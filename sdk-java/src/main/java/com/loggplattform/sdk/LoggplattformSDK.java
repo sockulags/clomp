@@ -121,12 +121,30 @@ public class LoggplattformSDK {
         logQueue.drainTo(logsToSend);
         
         for (LogEntry logEntry : logsToSend) {
-            sendLogSync(logEntry);
+            sendLogSync(logEntry, true); // Force send even during shutdown
         }
     }
     
     private void sendLog(LogEntry logEntry) {
         if (apiKey.isEmpty() || shutdown.get()) {
+            return;
+        }
+        sendLogInternal(logEntry);
+    }
+    
+    private void sendLogSync(LogEntry logEntry) {
+        sendLogSync(logEntry, false);
+    }
+    
+    private void sendLogSync(LogEntry logEntry, boolean force) {
+        if (apiKey.isEmpty() || (!force && shutdown.get())) {
+            return;
+        }
+        sendLogInternal(logEntry);
+    }
+    
+    private void sendLogInternal(LogEntry logEntry) {
+        if (apiKey.isEmpty()) {
             return;
         }
         
@@ -163,10 +181,6 @@ public class LoggplattformSDK {
                 System.err.println("Loggplattform SDK: Failed to send log: " + e.getMessage());
             }
         }
-    }
-    
-    private void sendLogSync(LogEntry logEntry) {
-        sendLog(logEntry);
     }
     
     public void info(String message) {
