@@ -1,4 +1,13 @@
 node_modules
-data
+npm-debug.log
+.git
+.gitignore
 .env
-*.log
+.env.*
+coverage
+data
+*.md
+eslint.config.js
+jest.config.js
+__tests__
+scripts

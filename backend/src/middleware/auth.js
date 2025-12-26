@@ -12,16 +12,19 @@ async function authenticate(req, res, next) {
   return new Promise((resolve) => {
     db.get('SELECT id, name FROM services WHERE api_key = ?', [apiKey], (err, service) => {
       if (err) {
-        return resolve(res.status(500).json({ error: 'Database error' }));
+        resolve(res.status(500).json({ error: 'Database error' }));
+        return;
       }
       
       if (!service) {
-        return resolve(res.status(401).json({ error: 'Invalid API key' }));
+        resolve(res.status(401).json({ error: 'Invalid API key' }));
+        return;
       }
       
       // Attach service info to request
       req.service = service;
       next();
+      resolve();
     });
   });
 }

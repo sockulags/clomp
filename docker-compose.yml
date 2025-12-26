@@ -11,9 +11,9 @@ services:
     environment:
       - PORT=3000
       - DB_PATH=/app/data/logs.db
-      # REQUIRED: Set a secure ADMIN_API_KEY for production
+      # REQUIRED: ADMIN_API_KEY must be set - no default value for security
       # Generate a secure random key: openssl rand -hex 32
-      - ADMIN_API_KEY=${ADMIN_API_KEY:-INSECURE-CHANGE-THIS-KEY}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:?ADMIN_API_KEY environment variable is required}
     volumes:
       - backend-data:/app/data
     restart: unless-stopped

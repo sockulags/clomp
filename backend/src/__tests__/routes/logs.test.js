@@ -88,11 +88,8 @@ describe('Log Routes', () => {
 
   describe('POST /api/logs/batch', () => {
     test('should create multiple log entries', (done) => {
-      let completed = 0;
-      
       const mockStmt = {
-        run: jest.fn((params, callback) => {
-          completed++;
+        run: jest.fn((_params, callback) => {
           // Simulate successful insert without time-based delay
           callback(null);
         }),

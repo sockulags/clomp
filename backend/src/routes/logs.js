@@ -222,7 +222,6 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { 
-      service, 
       level, 
       start_time, 
       end_time, 
@@ -335,7 +334,7 @@ router.get('/', async (req, res) => {
     }
     
     // Convert to array and sort by timestamp descending
-    let allLogs = Array.from(logMap.values());
+    const allLogs = Array.from(logMap.values());
     allLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     
     // Apply pagination

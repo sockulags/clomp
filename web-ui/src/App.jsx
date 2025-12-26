@@ -14,7 +14,7 @@ function App() {
     correlationId: ''
   });
   const [selectedLog, setSelectedLog] = useState(null);
-  const [apiKey, setApiKey] = useState(localStorage.getItem('apiKey') || 'test-api-key-123');
+  const [apiKey, setApiKey] = useState(localStorage.getItem('apiKey') || '');
 
   useEffect(() => {
     fetchLogs();

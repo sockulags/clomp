@@ -12,12 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
       
@@ -29,11 +29,11 @@ jobs:
         working-directory: ./backend
         run: npm test
         env:
-          ADMIN_API_KEY: test-admin-key
+          ADMIN_API_KEY: ${{ secrets.TEST_ADMIN_API_KEY || 'test-admin-key-for-ci' }}
           DB_PATH: ./test-data/logs.db
       
       - name: Upload coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         if: always()
         with:
           file: ./backend/coverage/coverage-final.json
@@ -45,12 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: web-ui/package-lock.json
       
@@ -67,19 +67,22 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
       
-      - name: Install ESLint
-        run: npm install -g eslint
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
       
       - name: Run ESLint
         working-directory: ./backend
-        run: eslint src/ --ext .js
+        run: npm run lint
 
   docker-build:
     name: Build Docker Images
@@ -87,13 +90,13 @@ jobs:
     needs: [test-backend, test-web-ui]
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       
       - name: Build backend image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: false
@@ -102,7 +105,7 @@ jobs:
           cache-to: type=gha,mode=max
       
       - name: Build web-ui image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: ./web-ui
           push: false

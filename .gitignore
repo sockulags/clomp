@@ -1,6 +1,9 @@
 node_modules/
 *.log
 .env
+.env.local
+.env.production
+.env.*.local
 .DS_Store
 dist/
 build/

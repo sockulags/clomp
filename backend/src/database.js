@@ -58,11 +58,8 @@ function initDatabase() {
         db.run(`CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_logs_correlation_id ON logs(correlation_id)`);
 
-        // Create default service for testing
-        db.run(`INSERT OR IGNORE INTO services (id, name, api_key) 
-                VALUES ('default', 'default-service', 'test-api-key-123')`, () => {
-          resolve();
-        });
+        // Database initialized - resolve after indexes are created
+        resolve();
       });
     });
   });
