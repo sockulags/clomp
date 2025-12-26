@@ -55,13 +55,18 @@ logger.info('User logged in', {
 ### Med korrelations-ID
 
 ```javascript
-const correlationId = require('uuid').v4();
+// Install uuid för att generera korrelations-ID: npm install uuid
+const { v4: uuidv4 } = require('uuid');
+
+const correlationId = uuidv4();
 logger.setCorrelationId(correlationId);
 
 logger.info('Request started', { path: '/api/users' });
 logger.debug('Database query', { query: 'SELECT * FROM users' });
 logger.info('Request completed');
 ```
+
+**Notera:** `uuid` är inte ett SDK-beroende. Installera det endast om du behöver generera korrelations-ID. Du kan också använda vilket annat bibliotek eller metod som helst för att generera ID:n.
 
 ## API
 

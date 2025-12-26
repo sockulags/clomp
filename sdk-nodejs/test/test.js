@@ -10,8 +10,9 @@ const logger = new LoggplattformSDK({
 
 console.log('Testing Loggplattform Node.js SDK...\n');
 
-// Set correlation ID
-const correlationId = require('uuid').v4();
+// Set correlation ID (uuid is a devDependency for tests)
+const { v4: uuidv4 } = require('uuid');
+const correlationId = uuidv4();
 logger.setCorrelationId(correlationId);
 console.log(`Correlation ID: ${correlationId}\n`);
 
