@@ -231,6 +231,7 @@ public class LoggplattformSDK {
                 executorService.shutdownNow();
             }
             flushSync();
+            httpClient.connectionPool().evictAll();
             httpClient.dispatcher().executorService().shutdown();
         }
     }
