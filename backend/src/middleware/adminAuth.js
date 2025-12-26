@@ -30,21 +30,19 @@ async function authenticateAdmin(req, res, next) {
   // This allows any valid service to perform admin operations
   const db = getDatabase();
   
-  return new Promise((resolve) => {
-    db.get('SELECT id, name FROM services WHERE api_key = ?', [apiKey], (err, service) => {
-      if (err) {
-        return resolve(res.status(500).json({ error: 'Database error' }));
-      }
-      
-      if (!service) {
-        return resolve(res.status(401).json({ error: 'Invalid API key' }));
-      }
-      
-      // Attach service info to request
-      req.service = service;
-      req.isAdmin = true;
-      next();
-    });
+  db.get('SELECT id, name FROM services WHERE api_key = ?', [apiKey], (err, service) => {
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+    
+    if (!service) {
+      return res.status(401).json({ error: 'Invalid API key' });
+    }
+    
+    // Attach service info to request
+    req.service = service;
+    req.isAdmin = true;
+    return next();
   });
 }
 
