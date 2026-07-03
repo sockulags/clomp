@@ -2,7 +2,7 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { getDatabase, getDatabaseType } = require('../database');
+const { getDatabase, getDatabaseType, getPool } = require('../database');
 const logger = require('../logger');
 
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR || path.join(__dirname, '../../data/archives');
@@ -29,11 +29,8 @@ function getArchiveFilePath(date, service) {
  * Delete logs from PostgreSQL by IDs
  */
 async function deleteLogsPostgres(logIds) {
-  const { Pool } = require('pg');
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-  });
-  
+  // Use the shared connection pool from the database module
+  const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -52,7 +49,6 @@ async function deleteLogsPostgres(logIds) {
     throw err;
   } finally {
     client.release();
-    await pool.end();
   }
 }
 

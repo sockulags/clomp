@@ -1,6 +1,6 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { getDatabase, getDatabaseType } = require('../database');
+const { getDatabase, getDatabaseType, getPool } = require('../database');
 const { readArchivedLogs } = require('../services/archive');
 const rateLimit = require('express-rate-limit');
 const logger = require('../logger');
@@ -27,14 +27,10 @@ const batchLimiter = rateLimit({
  * Insert batch logs for PostgreSQL
  */
 async function insertBatchPostgres(db, logs, service) {
-  const { Pool } = require('pg');
   const results = [];
-  
-  // Get pool from database URL
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-  });
-  
+
+  // Use the shared connection pool from the database module
+  const pool = getPool();
   const client = await pool.connect();
   
   try {
@@ -68,9 +64,8 @@ async function insertBatchPostgres(db, logs, service) {
     throw err;
   } finally {
     client.release();
-    await pool.end();
   }
-  
+
   return results;
 }
 

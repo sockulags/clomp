@@ -362,6 +362,20 @@ function getDatabaseType() {
 }
 
 /**
+ * Get the shared PostgreSQL connection pool
+ * Only available after initDatabase() has run with DATABASE_URL set
+ */
+function getPool() {
+  if (DB_TYPE !== 'postgres') {
+    throw new Error('PostgreSQL pool is not available when using SQLite');
+  }
+  if (!pool) {
+    throw new Error('PostgreSQL pool is not initialized. Call initDatabase() first');
+  }
+  return pool;
+}
+
+/**
  * Close database connections
  */
 async function closeDatabase() {
@@ -385,5 +399,6 @@ module.exports = {
   initDatabase,
   getDatabase,
   getDatabaseType,
+  getPool,
   closeDatabase
 };

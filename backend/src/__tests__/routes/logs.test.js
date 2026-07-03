@@ -1,7 +1,7 @@
 const request = require('supertest');
 const express = require('express');
 const logRoutes = require('../../routes/logs');
-const { getDatabase, getDatabaseType } = require('../../database');
+const { getDatabase, getDatabaseType, getPool } = require('../../database');
 const { readArchivedLogs } = require('../../services/archive');
 
 jest.mock('../../database');
@@ -127,6 +127,69 @@ describe('Log Routes', () => {
         .expect((res) => {
           expect(res.body.created).toBe(2);
           expect(res.body.logs).toHaveLength(2);
+        })
+        .end(done);
+    });
+
+    test('should create multiple log entries with PostgreSQL using the shared pool', (done) => {
+      getDatabaseType.mockReturnValueOnce('postgres');
+
+      const mockClient = {
+        query: jest.fn().mockResolvedValue({ rows: [], rowCount: 1 }),
+        release: jest.fn()
+      };
+      const mockPool = {
+        connect: jest.fn().mockResolvedValue(mockClient)
+      };
+      getPool.mockReturnValue(mockPool);
+      getDatabase.mockReturnValue({});
+
+      request(app)
+        .post('/api/logs/batch')
+        .send({
+          logs: [
+            { level: 'info', message: 'Log 1' },
+            { level: 'error', message: 'Log 2' }
+          ]
+        })
+        .expect(201)
+        .expect((res) => {
+          expect(res.body.created).toBe(2);
+          expect(getPool).toHaveBeenCalled();
+          expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+          expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
+          expect(mockClient.release).toHaveBeenCalled();
+        })
+        .end(done);
+    });
+
+    test('should rollback and return 500 on PostgreSQL insert failure', (done) => {
+      getDatabaseType.mockReturnValueOnce('postgres');
+
+      const mockClient = {
+        query: jest.fn((sql) => {
+          if (typeof sql === 'string' && sql.startsWith('INSERT')) {
+            return Promise.reject(new Error('insert failed'));
+          }
+          return Promise.resolve({ rows: [], rowCount: 0 });
+        }),
+        release: jest.fn()
+      };
+      const mockPool = {
+        connect: jest.fn().mockResolvedValue(mockClient)
+      };
+      getPool.mockReturnValue(mockPool);
+      getDatabase.mockReturnValue({});
+
+      request(app)
+        .post('/api/logs/batch')
+        .send({
+          logs: [{ level: 'info', message: 'Log 1' }]
+        })
+        .expect(500)
+        .expect(() => {
+          expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
+          expect(mockClient.release).toHaveBeenCalled();
         })
         .end(done);
     });
