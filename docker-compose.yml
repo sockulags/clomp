@@ -33,8 +33,6 @@ services:
     build:
       context: ./web-ui
       dockerfile: Dockerfile
-      args:
-        - VITE_API_URL=${VITE_API_URL:-http://localhost:${BACKEND_PORT:-3001}}
     container_name: loggplattform-web-ui
     ports:
       - target: 80
