@@ -29,7 +29,7 @@ git --version
 
 ```bash
 git clone <repo-url>
-cd loggplattform
+cd loggservice
 ```
 
 ### 2. Skapa konfigurationsfil
@@ -42,16 +42,20 @@ cp .env.example .env
 
 **Redigera `.env`-filen och ställ in minst dessa värden:**
 
+> ⚠️ Observera: shell-substitution som `$(openssl rand -hex 32)` expanderas **inte** i `.env`-filer.
+> Generera nyckeln i terminalen först och klistra in det faktiska värdet.
+
 ```bash
-# OBLIGATORISK - Generera en säker nyckel:
-ADMIN_API_KEY=$(openssl rand -hex 32)
+# OBLIGATORISK - Generera en säker nyckel med: openssl rand -hex 32
+# Klistra in det genererade värdet här (inte kommandot!):
+ADMIN_API_KEY=ditt-genererade-värde-här
 
 # Portkonfiguration (undvik konflikter med port 3000)
 BACKEND_PORT=3001
 WEBUI_PORT=8080
 ```
 
-**Snabbkommando för att generera och spara ADMIN_API_KEY:**
+**Snabbkommando för att generera och spara ADMIN_API_KEY (körs i terminalen, där substitutionen fungerar):**
 
 ```bash
 echo "ADMIN_API_KEY=$(openssl rand -hex 32)" >> .env
@@ -121,14 +125,19 @@ xdg-open http://localhost:8080
 
 ## 🔑 Skapa din första tjänst och API-nyckel
 
-För att skicka loggar behöver du en API-nyckel:
+För att skicka loggar behöver du en API-nyckel. Att skapa tjänster är en admin-operation
+och kräver `ADMIN_API_KEY` (samma värde som du satte i `.env`) i `X-API-Key`-headern:
 
 ```bash
 # Skapa en tjänst (ersätt "min-app" med ditt tjänstnamn)
 curl -X POST http://localhost:3001/api/services \
+  -H "X-API-Key: $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "min-app"}'
 ```
+
+> Tips: om du inte redan har variabeln i skalet, ladda den från `.env` med
+> `export $(grep -v '^#' .env | xargs)` eller ersätt `$ADMIN_API_KEY` med värdet direkt.
 
 **Svaret innehåller din API-nyckel:**
 

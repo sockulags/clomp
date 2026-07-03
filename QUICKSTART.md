@@ -24,11 +24,16 @@ node test/test.js
 
 ## Skapa en tjänst och få API-nyckel
 
+Endpointen `POST /api/services` kräver admin-nyckeln (`ADMIN_API_KEY` från din `.env`):
+
 ```bash
 curl -X POST http://localhost:3001/api/services \
+  -H "X-API-Key: $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "my-service"}'
 ```
+
+Svaret innehåller tjänstens API-nyckel (`api_key`) som du använder för att skicka loggar.
 
 ## Skicka en logg
 
