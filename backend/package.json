@@ -34,7 +34,7 @@
     "uuid": "^14.0.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.28.5",
+    "@babel/core": "^8.0.0",
     "@babel/preset-env": "^8.0.2",
     "@eslint/js": "^9.39.2",
     "babel-jest": "^30.2.0",
