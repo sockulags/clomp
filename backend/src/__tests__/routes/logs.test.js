@@ -303,4 +303,126 @@ describe('Log Routes', () => {
         .end(done);
     });
   });
+
+  describe('GET /api/logs/:id', () => {
+    test('should return 200 with the log when the owning service requests a valid id', (done) => {
+      const mockRow = {
+        id: 'log-123',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        level: 'info',
+        service: 'test-service',
+        message: 'Test log',
+        context: null,
+        correlation_id: 'corr-1',
+        created_at: '2024-01-01T00:00:00.000Z'
+      };
+
+      const mockDb = {
+        get: jest.fn((query, params, callback) => {
+          callback(null, mockRow);
+        })
+      };
+      getDatabase.mockReturnValue(mockDb);
+
+      request(app)
+        .get('/api/logs/log-123')
+        .expect(200)
+        .expect((res) => {
+          expect(mockDb.get).toHaveBeenCalled();
+          expect(mockDb.get.mock.calls[0][1]).toEqual(['log-123', 'test-service']);
+          expect(res.body).toEqual({
+            id: 'log-123',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            level: 'info',
+            service: 'test-service',
+            message: 'Test log',
+            context: null,
+            correlation_id: 'corr-1',
+            created_at: '2024-01-01T00:00:00.000Z'
+          });
+        })
+        .end(done);
+    });
+
+    test('should return 404 when the id belongs to another service', (done) => {
+      // The WHERE id = ? AND service = ? filter excludes another service's row,
+      // so the driver yields no row.
+      const mockDb = {
+        get: jest.fn((query, params, callback) => {
+          callback(null, undefined);
+        })
+      };
+      getDatabase.mockReturnValue(mockDb);
+
+      request(app)
+        .get('/api/logs/other-service-log')
+        .expect(404)
+        .expect((res) => {
+          expect(res.body).toEqual({ error: 'Log not found' });
+        })
+        .end(done);
+    });
+
+    test('should return 404 when the id does not exist', (done) => {
+      const mockDb = {
+        get: jest.fn((query, params, callback) => {
+          callback(null, undefined);
+        })
+      };
+      getDatabase.mockReturnValue(mockDb);
+
+      request(app)
+        .get('/api/logs/nonexistent')
+        .expect(404)
+        .expect((res) => {
+          expect(res.body).toEqual({ error: 'Log not found' });
+        })
+        .end(done);
+    });
+
+    test('should return 500 when the database query fails', (done) => {
+      const mockDb = {
+        get: jest.fn((query, params, callback) => {
+          callback(new Error('db failure'));
+        })
+      };
+      getDatabase.mockReturnValue(mockDb);
+
+      request(app)
+        .get('/api/logs/log-123')
+        .expect(500)
+        .expect((res) => {
+          expect(res.body).toEqual({ error: 'Failed to query log' });
+        })
+        .end(done);
+    });
+
+    test('should parse a non-null context into an object', (done) => {
+      const mockRow = {
+        id: 'log-456',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        level: 'error',
+        service: 'test-service',
+        message: 'Context log',
+        context: '{"key":"value"}',
+        correlation_id: null,
+        created_at: '2024-01-01T00:00:00.000Z'
+      };
+
+      const mockDb = {
+        get: jest.fn((query, params, callback) => {
+          callback(null, mockRow);
+        })
+      };
+      getDatabase.mockReturnValue(mockDb);
+
+      request(app)
+        .get('/api/logs/log-456')
+        .expect(200)
+        .expect((res) => {
+          expect(res.body.context).toEqual({ key: 'value' });
+        })
+        .end(done);
+    });
+  });
 });
