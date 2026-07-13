@@ -88,8 +88,8 @@ When deploying this application, follow these security guidelines:
 
 ### Known Security Considerations
 
-- API keys are stored in plain text in the SQLite database
-- SQLite database is not encrypted at rest
+- API keys are stored in plain text in the database (hashing is planned)
+- The database is not encrypted at rest
 - Rate limiting should be tuned for your specific traffic patterns
 - Log data may contain sensitive information - handle accordingly
 

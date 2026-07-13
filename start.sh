@@ -26,22 +26,17 @@ if [ -z "$ADMIN_API_KEY" ]; then
     echo ""
 fi
 
-# Determine which compose files to use
 COMPOSE_FILES="-f docker-compose.yml"
 
-if [ -n "$DATABASE_URL" ] || [ "$USE_POSTGRES" = "true" ]; then
-    echo "🐘 PostgreSQL mode enabled"
-    
-    # Check for PostgreSQL password
-    if [ -z "$POSTGRES_PASSWORD" ]; then
-        echo "⚠️  POSTGRES_PASSWORD is not set. Generating a random password..."
-        export POSTGRES_PASSWORD=$(openssl rand -hex 16)
-        echo "   Generated POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
-    fi
-    
-    COMPOSE_FILES="$COMPOSE_FILES -f docker-compose.postgres.yml"
-else
-    echo "💾 SQLite mode (default)"
+# Check for PostgreSQL password
+if [ -z "$POSTGRES_PASSWORD" ]; then
+    echo "⚠️  POSTGRES_PASSWORD is not set. Generating a random password..."
+    export POSTGRES_PASSWORD=$(openssl rand -hex 16)
+    echo "   Generated POSTGRES_PASSWORD: $POSTGRES_PASSWORD"
+    echo ""
+    echo "   💡 Tip: Save this to your .env file:"
+    echo "   echo 'POSTGRES_PASSWORD=$POSTGRES_PASSWORD' >> .env"
+    echo ""
 fi
 
 # Get configured ports

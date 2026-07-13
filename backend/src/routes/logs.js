@@ -1,6 +1,6 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { getDatabase, getDatabaseType, getPool } = require('../database');
+const { getDatabase, getPool } = require('../database');
 const { readArchivedLogs } = require('../services/archive');
 const rateLimit = require('express-rate-limit');
 const logger = require('../logger');
@@ -24,9 +24,9 @@ const batchLimiter = rateLimit({
 });
 
 /**
- * Insert batch logs for PostgreSQL
+ * Insert batch logs in a single transaction
  */
-async function insertBatchPostgres(db, logs, service) {
+async function insertBatch(logs, service) {
   const results = [];
 
   // Use the shared connection pool from the database module
@@ -67,82 +67,6 @@ async function insertBatchPostgres(db, logs, service) {
   }
 
   return results;
-}
-
-/**
- * Insert batch logs for SQLite
- */
-function insertBatchSqlite(db, logs, service) {
-  return new Promise((resolve, reject) => {
-    const results = [];
-    let transactionFailed = false;
-    
-    db.serialize(() => {
-      db.run('BEGIN TRANSACTION');
-      
-      const stmt = db.prepare(
-        `INSERT INTO logs (id, timestamp, level, service, message, context, correlation_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      );
-      
-      let completed = 0;
-      const total = logs.length;
-      
-      for (const log of logs) {
-        const logId = uuidv4();
-        const timestamp = log.timestamp || new Date().toISOString();
-        const contextJson = log.context ? JSON.stringify(log.context) : null;
-        
-        stmt.run(
-          [logId, timestamp, log.level.toLowerCase(), service, log.message, contextJson, log.correlation_id || null],
-          function(err) {
-            if (transactionFailed) {
-              return;
-            }
-            
-            if (err) {
-              transactionFailed = true;
-              db.run('ROLLBACK', () => {
-                reject(err);
-              });
-              return;
-            }
-            
-            results.push({
-              id: logId,
-              timestamp,
-              level: log.level.toLowerCase(),
-              service,
-              message: log.message,
-              context: log.context,
-              correlation_id: log.correlation_id || null
-            });
-            
-            completed++;
-            if (completed >= total) {
-              stmt.finalize((finalizeErr) => {
-                if (finalizeErr) {
-                  transactionFailed = true;
-                  db.run('ROLLBACK', () => {
-                    reject(finalizeErr);
-                  });
-                } else {
-                  db.run('COMMIT', (commitErr) => {
-                    if (commitErr) {
-                      transactionFailed = true;
-                      reject(commitErr);
-                    } else {
-                      resolve(results);
-                    }
-                  });
-                }
-              });
-            }
-          }
-        );
-      }
-    });
-  });
 }
 
 // POST /api/logs/batch - Create multiple log entries at once
@@ -206,17 +130,8 @@ router.post('/batch', batchLimiter, async (req, res) => {
       });
     }
     
-    // Insert logs based on database type
-    const db = getDatabase();
-    const dbType = getDatabaseType();
-    
-    let results;
-    if (dbType === 'postgres') {
-      results = await insertBatchPostgres(db, logs, service);
-    } else {
-      results = await insertBatchSqlite(db, logs, service);
-    }
-    
+    const results = await insertBatch(logs, service);
+
     res.status(201).json({
       created: results.length,
       logs: results

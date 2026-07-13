@@ -2,7 +2,7 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { getDatabase, getDatabaseType, getPool } = require('../database');
+const { getDatabase, getPool } = require('../database');
 const logger = require('../logger');
 
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR || path.join(__dirname, '../../data/archives');
@@ -26,9 +26,9 @@ function getArchiveFilePath(date, service) {
 }
 
 /**
- * Delete logs from PostgreSQL by IDs
+ * Delete logs by IDs (after they have been written to an archive file)
  */
-async function deleteLogsPostgres(logIds) {
+async function deleteLogs(logIds) {
   // Use the shared connection pool from the database module
   const pool = getPool();
   const client = await pool.connect();
@@ -53,36 +53,6 @@ async function deleteLogsPostgres(logIds) {
 }
 
 /**
- * Delete logs from SQLite by IDs
- */
-function deleteLogsSqlite(db, logIds) {
-  return new Promise((resolve, reject) => {
-    db.serialize(() => {
-      db.run('BEGIN TRANSACTION');
-      const stmt = db.prepare('DELETE FROM logs WHERE id = ?');
-
-      for (const id of logIds) {
-        stmt.run(id);
-      }
-
-      stmt.finalize(err => {
-        if (err) {
-          db.run('ROLLBACK', () => reject(err));
-        } else {
-          db.run('COMMIT', commitErr => {
-            if (commitErr) {
-              reject(commitErr);
-            } else {
-              resolve();
-            }
-          });
-        }
-      });
-    });
-  });
-}
-
-/**
  * Archive logs older than specified days
  * Moves logs from database to JSONL files (one file per service per day)
  */
@@ -91,7 +61,6 @@ async function archiveOldLogs(daysOld = 1) {
     await ensureArchiveDir();
     
     const db = getDatabase();
-    const dbType = getDatabaseType();
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
     cutoffDate.setHours(0, 0, 0, 0); // Start of day
@@ -178,13 +147,8 @@ async function archiveOldLogs(daysOld = 1) {
         
         // Delete archived logs from database
         const logIds = logs.map(log => log.id);
-        
-        if (dbType === 'postgres') {
-          await deleteLogsPostgres(logIds);
-        } else {
-          await deleteLogsSqlite(db, logIds);
-        }
-        
+        await deleteLogs(logIds);
+
         totalArchived += logs.length;
         logger.debug({ service, dateStr, count: logs.length }, 'Archived logs for service');
       }

@@ -1,38 +1,75 @@
-// End-to-end coverage for the archive service (issue #93).
+// End-to-end coverage for the archive service.
 //
 // The sibling archive.test.js mocks out ../../database and only exercises the
 // pure getArchiveFilePath helper. This suite drives the real archiving/retention
-// logic (archiveOldLogs + deleteLogsSqlite, readArchivedLogs, cleanupOldArchives)
-// against a real temp SQLite database and a temp ARCHIVE_DIR.
-//
-// Why a raw sqlite3 handle instead of the production DatabaseAdapter:
-// archive.js's deleteLogsSqlite is written against the node-sqlite3 API directly
-// (positional stmt.run(id), stmt.finalize(cb), db.run('COMMIT', cb)). When it is
-// handed the production DatabaseAdapter (as it is in archive.js via getDatabase()),
-// the COMMIT completion callback is passed into the adapter's `params` argument
-// slot; node-sqlite3 keeps only the LAST trailing function as the callback, so
-// deleteLogsSqlite's resolve() never fires and archiveOldLogs never settles. That
-// is a latent wiring bug in database.js/archive.js and is out of scope for this
-// tests-only change (see PR notes). To exercise the archiving logic as authored,
-// we mock ../../database to return a real raw sqlite3 Database on a temp file.
-//
-// deleteLogsPostgres is intentionally NOT covered: it needs a live PostgreSQL
-// server (getPool().connect() + real BEGIN/DELETE/COMMIT), which would introduce
-// a Postgres test-harness dependency the repo does not have. Out of scope per the
-// issue's stop rule.
+// logic (archiveOldLogs, readArchivedLogs, cleanupOldArchives) against a temp
+// ARCHIVE_DIR, with the database layer replaced by an in-memory store that
+// answers the exact queries archive.js issues. No live PostgreSQL is needed:
+// the SQL surface is three fixed statements (SELECT DISTINCT services, SELECT
+// logs per service, DELETE by id batch).
 
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const sqlite3 = require('sqlite3').verbose();
 
-let mockRawDb = null;
+// In-memory database state, reset per test.
+let store = null;
 
-// Hand archive.js a real raw sqlite3 handle (set per-test in beforeEach).
+function makeStore() {
+  return {
+    services: [], // names
+    logs: [] // full rows as stored
+  };
+}
+
+// Adapter mock: answers the two SELECTs archiveOldLogs runs via db.all.
+const mockAdapter = {
+  all: (sql, params, callback) => {
+    try {
+      if (sql.includes('DISTINCT name FROM services')) {
+        callback(null, store.services.map(name => ({ name })));
+        return;
+      }
+      if (sql.includes('FROM logs')) {
+        const [service, cutoff, limit] = params;
+        const rows = store.logs
+          .filter(l => l.service === service && l.timestamp < cutoff)
+          .sort((a, b) => (a.timestamp < b.timestamp ? -1 : 1))
+          .slice(0, limit);
+        callback(null, rows);
+        return;
+      }
+      callback(new Error(`Unexpected SQL in fake adapter: ${sql}`));
+    } catch (err) {
+      callback(err);
+    }
+  }
+};
+
+// Pool mock: handles BEGIN/COMMIT/ROLLBACK and the batched DELETE in deleteLogs.
+const mockClient = {
+  query: jest.fn((sql, params) => {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    }
+    if (sql.startsWith('DELETE FROM logs WHERE id IN')) {
+      const before = store.logs.length;
+      const ids = new Set(params);
+      store.logs = store.logs.filter(l => !ids.has(l.id));
+      return Promise.resolve({ rows: [], rowCount: before - store.logs.length });
+    }
+    return Promise.reject(new Error(`Unexpected SQL in fake client: ${sql}`));
+  }),
+  release: jest.fn()
+};
+
+const mockPool = {
+  connect: jest.fn(() => Promise.resolve(mockClient))
+};
+
 jest.mock('../../database', () => ({
-  getDatabase: () => mockRawDb,
-  getDatabaseType: () => 'sqlite',
-  getPool: jest.fn()
+  getDatabase: () => mockAdapter,
+  getPool: () => mockPool
 }));
 
 jest.mock('../../logger', () => ({
@@ -43,89 +80,12 @@ jest.mock('../../logger', () => ({
   fatal: jest.fn()
 }));
 
-// Promisified helpers around the raw sqlite3 driver.
-function openDb(dbPath) {
-  return new Promise((resolve, reject) => {
-    const db = new sqlite3.Database(dbPath, err => (err ? reject(err) : resolve(db)));
-  });
+function insertService(name) {
+  store.services.push(name);
 }
 
-function closeDb(db) {
-  return new Promise((resolve, reject) => {
-    db.close(err => (err ? reject(err) : resolve()));
-  });
-}
-
-function exec(db, sql) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, err => (err ? reject(err) : resolve()));
-  });
-}
-
-function run(db, sql, params) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
-}
-
-function all(db, sql, params) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
-  });
-}
-
-async function createSchema(db) {
-  await exec(
-    db,
-    `CREATE TABLE services (
-       id TEXT PRIMARY KEY,
-       name TEXT NOT NULL UNIQUE,
-       api_key TEXT NOT NULL UNIQUE,
-       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-     )`
-  );
-  await exec(
-    db,
-    `CREATE TABLE logs (
-       id TEXT PRIMARY KEY,
-       timestamp DATETIME NOT NULL,
-       level TEXT NOT NULL,
-       service TEXT NOT NULL,
-       message TEXT NOT NULL,
-       context TEXT,
-       correlation_id TEXT,
-       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-     )`
-  );
-}
-
-async function insertService(db, name) {
-  await run(db, 'INSERT INTO services (id, name, api_key) VALUES (?, ?, ?)', [
-    `id-${name}`,
-    name,
-    `key-${name}`
-  ]);
-}
-
-async function insertLog(db, log) {
-  await run(
-    db,
-    `INSERT INTO logs (id, timestamp, level, service, message, context, correlation_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      log.id,
-      log.timestamp,
-      log.level,
-      log.service,
-      log.message,
-      log.context,
-      log.correlation_id,
-      log.created_at
-    ]
-  );
+function insertLog(log) {
+  store.logs.push({ ...log });
 }
 
 // Mirrors the date-bucket loop inside readArchivedLogs so the test writes archive
@@ -155,7 +115,7 @@ describe('Archive service (end-to-end)', () => {
   let archiveDir;
   let archive;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     jest.clearAllMocks();
     jest.resetModules();
 
@@ -164,35 +124,29 @@ describe('Archive service (end-to-end)', () => {
     process.env.ARCHIVE_DIR = archiveDir;
     process.env.ARCHIVE_RETENTION_DAYS = '30';
 
-    mockRawDb = await openDb(path.join(tmpRoot, 'logs.db'));
-    await createSchema(mockRawDb);
+    store = makeStore();
 
     archive = require('../../services/archive');
   });
 
-  afterEach(async () => {
-    try {
-      if (mockRawDb) await closeDb(mockRawDb);
-    } catch {
-      // ignore close errors during teardown
-    }
-    mockRawDb = null;
+  afterEach(() => {
+    store = null;
     delete process.env.ARCHIVE_DIR;
     delete process.env.ARCHIVE_RETENTION_DAYS;
     try {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     } catch {
-      // Windows can transiently hold the sqlite file; best-effort cleanup.
+      // Windows can transiently hold files; best-effort cleanup.
     }
   });
 
   describe('archiveOldLogs', () => {
     test('writes JSONL buckets and removes archived rows from the DB', async () => {
-      await insertService(mockRawDb, 'api');
-      await insertService(mockRawDb, 'web');
+      insertService('api');
+      insertService('web');
 
       // Two old logs on 2020-01-01 (same bucket) + one on 2020-01-02 for "api".
-      await insertLog(mockRawDb, {
+      insertLog({
         id: 'l1',
         timestamp: '2020-01-01T10:00:00.000Z',
         level: 'info',
@@ -202,7 +156,7 @@ describe('Archive service (end-to-end)', () => {
         correlation_id: 'c1',
         created_at: '2020-01-01T10:00:00.000Z'
       });
-      await insertLog(mockRawDb, {
+      insertLog({
         id: 'l2',
         timestamp: '2020-01-01T12:00:00.000Z',
         level: 'error',
@@ -212,7 +166,7 @@ describe('Archive service (end-to-end)', () => {
         correlation_id: 'c2',
         created_at: '2020-01-01T12:00:00.000Z'
       });
-      await insertLog(mockRawDb, {
+      insertLog({
         id: 'l3',
         timestamp: '2020-01-02T09:00:00.000Z',
         level: 'warn',
@@ -223,7 +177,7 @@ describe('Archive service (end-to-end)', () => {
         created_at: '2020-01-02T09:00:00.000Z'
       });
       // One old log for a second service to exercise the services loop.
-      await insertLog(mockRawDb, {
+      insertLog({
         id: 'l5',
         timestamp: '2020-01-01T08:00:00.000Z',
         level: 'info',
@@ -234,7 +188,7 @@ describe('Archive service (end-to-end)', () => {
         created_at: '2020-01-01T08:00:00.000Z'
       });
       // A recent log that must NOT be archived (newer than the cutoff).
-      await insertLog(mockRawDb, {
+      insertLog({
         id: 'l4',
         timestamp: new Date().toISOString(),
         level: 'info',
@@ -288,14 +242,16 @@ describe('Archive service (end-to-end)', () => {
       expect(webJan1Lines).toHaveLength(1);
       expect(webJan1Lines[0].id).toBe('l5');
 
-      // deleteLogsSqlite ran: only the recent log remains in the DB.
-      const remaining = await all(mockRawDb, 'SELECT id FROM logs ORDER BY id', []);
-      expect(remaining.map(r => r.id)).toEqual(['l4']);
+      // deleteLogs ran inside a transaction: only the recent log remains.
+      expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+      expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
+      expect(mockClient.release).toHaveBeenCalled();
+      expect(store.logs.map(l => l.id)).toEqual(['l4']);
     });
 
     test('returns 0 and writes nothing when there is nothing old to archive', async () => {
-      await insertService(mockRawDb, 'api');
-      await insertLog(mockRawDb, {
+      insertService('api');
+      insertLog({
         id: 'recent-only',
         timestamp: new Date().toISOString(),
         level: 'info',
@@ -309,8 +265,8 @@ describe('Archive service (end-to-end)', () => {
       const total = await archive.archiveOldLogs(1);
 
       expect(total).toBe(0);
-      const remaining = await all(mockRawDb, 'SELECT id FROM logs', []);
-      expect(remaining).toHaveLength(1);
+      expect(store.logs).toHaveLength(1);
+      expect(mockPool.connect).not.toHaveBeenCalled();
     });
   });
 
@@ -459,7 +415,7 @@ describe('Archive service (end-to-end)', () => {
     beforeEach(() => {
       jest.useFakeTimers({
         now: FIXED_NOW,
-        // Only fake Date; leave timers/microtasks/IO alone so fs + sqlite work.
+        // Only fake Date; leave timers/microtasks/IO alone so fs works.
         doNotFake: [
           'setTimeout',
           'clearTimeout',

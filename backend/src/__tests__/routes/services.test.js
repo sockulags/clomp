@@ -57,7 +57,8 @@ describe('Service Routes', () => {
     test('should return 409 for duplicate service name', (done) => {
       const mockDb = {
         run: jest.fn((query, params, callback) => {
-          const error = new Error('UNIQUE constraint failed: services.name');
+          const error = new Error('duplicate key value violates unique constraint "services_name_key"');
+          error.code = '23505';
           callback(error);
         })
       };

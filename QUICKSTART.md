@@ -63,30 +63,6 @@ const logger = new LoggplattformSDK({
 logger.info('App started');
 ```
 
-### TypeScript
-```typescript
-import { LoggplattformSDK } from './sdk-typescript/src/index';
-
-const logger = new LoggplattformSDK({
-  apiUrl: 'http://localhost:3001',
-  apiKey: 'your-api-key',
-  service: 'my-service'
-});
-
-logger.info('App started');
-```
-
-### Java
-```java
-LoggplattformSDK logger = new LoggplattformSDK.Builder()
-    .apiUrl("http://localhost:3001")
-    .apiKey("your-api-key")
-    .service("my-service")
-    .build();
-
-logger.info("App started");
-```
-
 ## Stoppa tjänsterna
 
 ```bash

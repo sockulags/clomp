@@ -3,7 +3,9 @@
 [![CI](https://github.com/sockulags/loggservice/actions/workflows/ci.yml/badge.svg)](https://github.com/sockulags/loggservice/actions/workflows/ci.yml)
 [![Security](https://github.com/sockulags/loggservice/actions/workflows/security.yml/badge.svg)](https://github.com/sockulags/loggservice/actions/workflows/security.yml)
 
-Self-hosted log collection platform: multiple services and languages send logs through small SDKs to a central API, which stores them in SQLite or PostgreSQL, archives them nightly to JSONL files, and serves them to a React dashboard.
+Self-hosted log collection platform: services send logs through a small SDK or plain REST to a central API, which stores them in PostgreSQL, archives them nightly to JSONL files, and serves them to a React dashboard.
+
+> **Note:** this project is pivoting to **clomp** — an open source, tamper-evident audit trail for security work (SOC 2 / NIS2). See [docs/pivot-audit-trail.md](docs/pivot-audit-trail.md).
 
 > Parts of the extended documentation ([SETUP.md](SETUP.md), [QUICKSTART.md](QUICKSTART.md), [ARCHIVE.md](ARCHIVE.md)) are currently in Swedish.
 
@@ -13,8 +15,7 @@ Self-hosted log collection platform: multiple services and languages send logs t
 flowchart LR
     subgraph Clients
         A[Node.js SDK]
-        B[TypeScript SDK]
-        C[Java SDK]
+        B[REST clients]
     end
 
     subgraph Backend["Backend — Express (host :3001)"]
@@ -23,7 +24,7 @@ flowchart LR
     end
 
     subgraph Storage
-        DB[("SQLite (default)<br/>or PostgreSQL")]
+        DB[("PostgreSQL")]
         AR[["JSONL archives<br/>data/archives/YYYY-MM-DD/"]]
     end
 
@@ -31,7 +32,6 @@ flowchart LR
 
     A -- "batched logs" --> API
     B -- "batched logs" --> API
-    C -- "batched logs" --> API
     API --> DB
     CRON -- "archive > 1 day,<br/>prune > 30 days" --> AR
     DB --> CRON
@@ -52,7 +52,7 @@ cd loggservice
 
 # Configure environment
 cp .env.example .env
-# Set ADMIN_API_KEY in .env to a strong random value, e.g. the output of:
+# Set ADMIN_API_KEY and POSTGRES_PASSWORD in .env to strong random values, e.g.:
 openssl rand -hex 32
 
 docker compose up -d
@@ -60,12 +60,6 @@ docker compose up -d
 
 - Web UI: http://localhost:8080
 - API: http://localhost:3001
-
-To use PostgreSQL instead of SQLite:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
-```
 
 ## Register a service and send logs
 
@@ -97,7 +91,7 @@ const log = new LoggplattformSDK({ apiKey: '<service-api-key>', apiUrl: 'http://
 log.info('Hello from my-app')
 ```
 
-SDKs for [Node.js](sdk-nodejs/), [TypeScript](sdk-typescript/) and [Java](sdk-java/) queue logs locally and ship them in batches.
+The [Node.js SDK](sdk-nodejs/) queues logs locally and ships them in batches.
 
 ## Development
 

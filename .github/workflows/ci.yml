@@ -30,7 +30,6 @@ jobs:
         run: npm test
         env:
           ADMIN_API_KEY: ${{ secrets.TEST_ADMIN_API_KEY || 'test-admin-key-for-ci' }}
-          DB_PATH: ./test-data/logs.db
       
       - name: Upload coverage
         uses: codecov/codecov-action@v7

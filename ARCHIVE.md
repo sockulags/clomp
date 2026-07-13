@@ -3,7 +3,7 @@
 ## Översikt
 
 Loggplattform använder ett hybridsystem för lagring:
-- **Databas (SQLite):** Senaste loggarna (konfigurerbart, standard 1 dag)
+- **Databas (PostgreSQL):** Senaste loggarna (konfigurerbart, standard 1 dag)
 - **Arkiverade filer (JSONL):** Äldre loggar sparas som filer
 
 Detta gör det möjligt att hantera miljarder loggar utan att databasen blir för stor.

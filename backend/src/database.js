@@ -1,190 +1,22 @@
-const path = require('path');
-const fs = require('fs');
 const logger = require('./logger');
 
-// Determine database type from environment
+// PostgreSQL is the only supported database.
 const DATABASE_URL = process.env.DATABASE_URL;
-const DB_TYPE = DATABASE_URL ? 'postgres' : 'sqlite';
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../data/logs.db');
-
-let db = null;
 let pool = null;
 
 /**
- * Database abstraction layer that supports both SQLite and PostgreSQL
- * Provides a unified callback-style API similar to sqlite3
+ * Thin adapter over the pg pool that exposes a callback-style API
+ * (run/get/all) with SQLite-style ? placeholders, so route code can
+ * use one query dialect.
  */
 class DatabaseAdapter {
-  constructor(type) {
-    this.type = type;
-  }
-
   /**
    * Run a query that doesn't return rows (INSERT, UPDATE, DELETE)
    */
   run(sql, params, callback) {
-    if (this.type === 'postgres') {
-      const pgSql = this._convertPlaceholders(sql);
-      pool.query(pgSql, params)
-        .then(result => {
-          if (callback) callback.call({ changes: result.rowCount }, null);
-        })
-        .catch(err => {
-          if (callback) callback(err);
-        });
-    } else {
-      db.run(sql, params, function(err) {
-        if (callback) callback.call(this, err);
-      });
-    }
-  }
-
-  /**
-   * Get a single row
-   */
-  get(sql, params, callback) {
-    if (this.type === 'postgres') {
-      const pgSql = this._convertPlaceholders(sql);
-      pool.query(pgSql, params)
-        .then(result => {
-          callback(null, result.rows[0] || null);
-        })
-        .catch(err => {
-          callback(err, null);
-        });
-    } else {
-      db.get(sql, params, callback);
-    }
-  }
-
-  /**
-   * Get all rows
-   */
-  all(sql, params, callback) {
-    if (this.type === 'postgres') {
-      const pgSql = this._convertPlaceholders(sql);
-      pool.query(pgSql, params)
-        .then(result => {
-          callback(null, result.rows);
-        })
-        .catch(err => {
-          callback(err, null);
-        });
-    } else {
-      db.all(sql, params, callback);
-    }
-  }
-
-  /**
-   * Serialize operations (transactions in PostgreSQL, serialize in SQLite)
-   */
-  serialize(fn) {
-    if (this.type === 'postgres') {
-      // PostgreSQL handles this differently - we run operations sequentially
-      fn();
-    } else {
-      db.serialize(fn);
-    }
-  }
-
-  /**
-   * Prepare a statement for batch operations
-   */
-  prepare(sql) {
-    if (this.type === 'postgres') {
-      return new PostgresPreparedStatement(sql, pool);
-    } else {
-      return new SqlitePreparedStatement(db.prepare(sql));
-    }
-  }
-
-  /**
-   * Convert SQLite ? placeholders to PostgreSQL $1, $2, etc.
-   */
-  _convertPlaceholders(sql) {
-    let index = 0;
-    return sql.replace(/\?/g, () => `$${++index}`);
-  }
-
-  /**
-   * Get the database type
-   */
-  getType() {
-    return this.type;
-  }
-
-  /**
-   * Begin a transaction
-   */
-  async beginTransaction() {
-    if (this.type === 'postgres') {
-      const client = await pool.connect();
-      await client.query('BEGIN');
-      return client;
-    } else {
-      return new Promise((resolve, reject) => {
-        db.run('BEGIN TRANSACTION', (err) => {
-          if (err) reject(err);
-          else resolve(db);
-        });
-      });
-    }
-  }
-
-  /**
-   * Commit a transaction
-   */
-  async commitTransaction(client) {
-    if (this.type === 'postgres') {
-      await client.query('COMMIT');
-      client.release();
-    } else {
-      return new Promise((resolve, reject) => {
-        db.run('COMMIT', (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    }
-  }
-
-  /**
-   * Rollback a transaction
-   */
-  async rollbackTransaction(client) {
-    if (this.type === 'postgres') {
-      await client.query('ROLLBACK');
-      client.release();
-    } else {
-      return new Promise((resolve, reject) => {
-        db.run('ROLLBACK', (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    }
-  }
-}
-
-/**
- * PostgreSQL prepared statement wrapper
- */
-class PostgresPreparedStatement {
-  constructor(sql, pool) {
-    this.sql = sql;
-    this.pool = pool;
-    this.pgSql = this._convertPlaceholders(sql);
-    this.pendingOperations = [];
-  }
-
-  _convertPlaceholders(sql) {
-    let index = 0;
-    return sql.replace(/\?/g, () => `$${++index}`);
-  }
-
-  run(params, callback) {
-    this.pool.query(this.pgSql, params)
+    const pgSql = convertPlaceholders(sql);
+    getPool().query(pgSql, params)
       .then(result => {
         if (callback) callback.call({ changes: result.rowCount }, null);
       })
@@ -193,58 +25,61 @@ class PostgresPreparedStatement {
       });
   }
 
-  finalize(callback) {
-    // PostgreSQL doesn't need to finalize prepared statements in this context
-    if (callback) callback(null);
+  /**
+   * Get a single row
+   */
+  get(sql, params, callback) {
+    const pgSql = convertPlaceholders(sql);
+    getPool().query(pgSql, params)
+      .then(result => {
+        callback(null, result.rows[0] || null);
+      })
+      .catch(err => {
+        callback(err, null);
+      });
+  }
+
+  /**
+   * Get all rows
+   */
+  all(sql, params, callback) {
+    const pgSql = convertPlaceholders(sql);
+    getPool().query(pgSql, params)
+      .then(result => {
+        callback(null, result.rows);
+      })
+      .catch(err => {
+        callback(err, null);
+      });
   }
 }
 
 /**
- * SQLite prepared statement wrapper
+ * Convert SQLite-style ? placeholders to PostgreSQL $1, $2, etc.
  */
-class SqlitePreparedStatement {
-  constructor(stmt) {
-    this.stmt = stmt;
-  }
-
-  run(params, callback) {
-    this.stmt.run(params, function(err) {
-      if (callback) callback.call(this, err);
-    });
-  }
-
-  finalize(callback) {
-    this.stmt.finalize(callback);
-  }
+function convertPlaceholders(sql) {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`);
 }
 
 /**
- * Initialize the database
+ * Initialize the database: connect and create tables/indexes.
  */
 async function initDatabase() {
-  if (DB_TYPE === 'postgres') {
-    return initPostgres();
-  } else {
-    return initSqlite();
+  if (!DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is required (PostgreSQL connection string)');
   }
-}
 
-/**
- * Initialize PostgreSQL
- */
-async function initPostgres() {
   const { Pool } = require('pg');
-  
+
   pool = new Pool({
     connectionString: DATABASE_URL,
   });
 
-  // Test connection
   try {
     const client = await pool.connect();
-    logger.info({ type: 'postgres', url: DATABASE_URL.replace(/:[^:@]*@/, ':***@') }, 'Connected to PostgreSQL');
-    
-    // Create tables
+    logger.info({ url: DATABASE_URL.replace(/:[^:@]*@/, ':***@') }, 'Connected to PostgreSQL');
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS services (
         id TEXT PRIMARY KEY,
@@ -267,12 +102,11 @@ async function initPostgres() {
       )
     `);
 
-    // Create indexes
     await client.query('CREATE INDEX IF NOT EXISTS idx_logs_service ON logs(service)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_logs_correlation_id ON logs(correlation_id)');
-    
+
     client.release();
     logger.info('PostgreSQL tables initialized');
   } catch (err) {
@@ -282,93 +116,17 @@ async function initPostgres() {
 }
 
 /**
- * Initialize SQLite
- */
-function initSqlite() {
-  const sqlite3 = require('sqlite3').verbose();
-  
-  // Ensure data directory exists
-  const dataDir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  return new Promise((resolve, reject) => {
-    db = new sqlite3.Database(DB_PATH, (err) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      
-      logger.info({ type: 'sqlite', path: DB_PATH }, 'Connected to SQLite');
-      
-      // Create tables
-      db.serialize(() => {
-        // Services table
-        db.run(`CREATE TABLE IF NOT EXISTS services (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL UNIQUE,
-          api_key TEXT NOT NULL UNIQUE,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`, (err) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-        });
-
-        // Logs table
-        db.run(`CREATE TABLE IF NOT EXISTS logs (
-          id TEXT PRIMARY KEY,
-          timestamp DATETIME NOT NULL,
-          level TEXT NOT NULL,
-          service TEXT NOT NULL,
-          message TEXT NOT NULL,
-          context TEXT,
-          correlation_id TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`, (err) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-        });
-
-        // Create indexes
-        db.run(`CREATE INDEX IF NOT EXISTS idx_logs_service ON logs(service)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_logs_correlation_id ON logs(correlation_id)`);
-
-        logger.info('SQLite tables initialized');
-        resolve();
-      });
-    });
-  });
-}
-
-/**
  * Get the database adapter instance
  */
 function getDatabase() {
-  return new DatabaseAdapter(DB_TYPE);
-}
-
-/**
- * Get the database type
- */
-function getDatabaseType() {
-  return DB_TYPE;
+  return new DatabaseAdapter();
 }
 
 /**
  * Get the shared PostgreSQL connection pool
- * Only available after initDatabase() has run with DATABASE_URL set
+ * Only available after initDatabase() has run
  */
 function getPool() {
-  if (DB_TYPE !== 'postgres') {
-    throw new Error('PostgreSQL pool is not available when using SQLite');
-  }
   if (!pool) {
     throw new Error('PostgreSQL pool is not initialized. Call initDatabase() first');
   }
@@ -379,26 +137,16 @@ function getPool() {
  * Close database connections
  */
 async function closeDatabase() {
-  if (DB_TYPE === 'postgres' && pool) {
+  if (pool) {
     await pool.end();
+    pool = null;
     logger.info('PostgreSQL connection pool closed');
-  } else if (db) {
-    return new Promise((resolve, reject) => {
-      db.close((err) => {
-        if (err) reject(err);
-        else {
-          logger.info('SQLite database closed');
-          resolve();
-        }
-      });
-    });
   }
 }
 
 module.exports = {
   initDatabase,
   getDatabase,
-  getDatabaseType,
   getPool,
   closeDatabase
 };

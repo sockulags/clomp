@@ -1,14 +1,11 @@
 const request = require('supertest');
 const express = require('express');
 const logRoutes = require('../../routes/logs');
-const { getDatabase, getDatabaseType, getPool } = require('../../database');
+const { getDatabase, getPool } = require('../../database');
 const { readArchivedLogs } = require('../../services/archive');
 
 jest.mock('../../database');
 jest.mock('../../services/archive');
-
-// Default to SQLite for tests
-getDatabaseType.mockReturnValue('sqlite');
 
 const mockAuthenticate = jest.fn((req, res, next) => {
   req.service = { id: 'test-id', name: 'test-service' };
@@ -90,50 +87,7 @@ describe('Log Routes', () => {
   });
 
   describe('POST /api/logs/batch', () => {
-    test('should create multiple log entries', (done) => {
-      const mockStmt = {
-        run: jest.fn((_params, callback) => {
-          // Simulate successful insert without time-based delay
-          callback(null);
-        }),
-        finalize: jest.fn((callback) => {
-          callback(null);
-        })
-      };
-      
-      const mockDb = {
-        serialize: jest.fn((callback) => {
-          callback();
-        }),
-        run: jest.fn((query, callback) => {
-          if (query === 'BEGIN TRANSACTION' || query === 'COMMIT' || query === 'ROLLBACK') {
-            // These are called without a callback
-            if (callback) callback(null);
-          }
-        }),
-        prepare: jest.fn(() => mockStmt)
-      };
-      getDatabase.mockReturnValue(mockDb);
-
-      request(app)
-        .post('/api/logs/batch')
-        .send({
-          logs: [
-            { level: 'info', message: 'Log 1' },
-            { level: 'error', message: 'Log 2' }
-          ]
-        })
-        .expect(201)
-        .expect((res) => {
-          expect(res.body.created).toBe(2);
-          expect(res.body.logs).toHaveLength(2);
-        })
-        .end(done);
-    });
-
-    test('should create multiple log entries with PostgreSQL using the shared pool', (done) => {
-      getDatabaseType.mockReturnValueOnce('postgres');
-
+    test('should create multiple log entries using the shared pool', (done) => {
       const mockClient = {
         query: jest.fn().mockResolvedValue({ rows: [], rowCount: 1 }),
         release: jest.fn()
@@ -155,6 +109,7 @@ describe('Log Routes', () => {
         .expect(201)
         .expect((res) => {
           expect(res.body.created).toBe(2);
+          expect(res.body.logs).toHaveLength(2);
           expect(getPool).toHaveBeenCalled();
           expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
           expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
@@ -163,9 +118,7 @@ describe('Log Routes', () => {
         .end(done);
     });
 
-    test('should rollback and return 500 on PostgreSQL insert failure', (done) => {
-      getDatabaseType.mockReturnValueOnce('postgres');
-
+    test('should rollback and return 500 on insert failure', (done) => {
       const mockClient = {
         query: jest.fn((sql) => {
           if (typeof sql === 'string' && sql.startsWith('INSERT')) {

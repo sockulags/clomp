@@ -63,15 +63,9 @@ echo "BACKEND_PORT=3001" >> .env
 echo "WEBUI_PORT=8080" >> .env
 ```
 
-### 3. Välj databas
+### 3. Konfigurera PostgreSQL
 
-#### Alternativ A: SQLite (Standard - enklast)
-
-Ingen extra konfiguration behövs. Bara fortsätt till steg 4.
-
-#### Alternativ B: PostgreSQL
-
-Lägg till dessa rader i din `.env`-fil:
+Plattformen använder PostgreSQL (startas automatiskt av docker-compose). Lägg till dessa rader i din `.env`-fil:
 
 ```bash
 # PostgreSQL-konfiguration
@@ -83,20 +77,10 @@ POSTGRES_PORT=5432
 
 ### 4. Starta applikationen
 
-#### Med SQLite (standard):
-
 ```bash
 # Ladda miljövariabler och starta
 export $(grep -v '^#' .env | xargs)
 docker-compose up -d --build
-```
-
-#### Med PostgreSQL:
-
-```bash
-# Ladda miljövariabler och starta med PostgreSQL
-export $(grep -v '^#' .env | xargs)
-docker-compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
 ```
 
 #### Eller använd start-skriptet (automatiskt):
@@ -182,61 +166,6 @@ logger.debug('Debug-info', { userId: 123, action: 'login' });
 await logger.flush();
 ```
 
-### TypeScript SDK
-
-```bash
-cd sdk-typescript
-npm install
-npm run build
-```
-
-```typescript
-import { LoggplattformSDK } from './src/index';
-
-const logger = new LoggplattformSDK({
-  apiUrl: 'http://localhost:3001',
-  apiKey: 'din-api-nyckel-här',
-  service: 'min-app'
-});
-
-logger.info('Applikationen startade');
-logger.error('Ett fel uppstod', { errorCode: 500 });
-```
-
-### Java SDK
-
-```bash
-cd sdk-java
-mvn clean install
-```
-
-```java
-import com.loggplattform.sdk.LoggplattformSDK;
-import java.util.HashMap;
-import java.util.Map;
-
-LoggplattformSDK logger = new LoggplattformSDK.Builder()
-    .apiUrl("http://localhost:3001")
-    .apiKey("din-api-nyckel-här")
-    .service("min-app")
-    .environment("development")
-    .build();
-
-// Enkla loggar
-logger.info("Applikationen startade");
-logger.warn("Varning");
-logger.error("Fel uppstod");
-
-// Med kontext
-Map<String, Object> context = new HashMap<>();
-context.put("userId", 123);
-context.put("action", "login");
-logger.debug("Användaraktivitet", context);
-
-// Glöm inte stänga vid avslut
-logger.shutdown();
-```
-
 ---
 
 ## 🐘 Anslut till din egen PostgreSQL
@@ -269,7 +198,7 @@ export $(grep -v '^#' .env | xargs)
 docker-compose up -d --build
 ```
 
-Backend kommer automatiskt att använda PostgreSQL istället för SQLite när `DATABASE_URL` är satt.
+Backend använder anslutningen i `DATABASE_URL`.
 
 ### 4. Skapa tabellerna manuellt (om det behövs)
 
@@ -440,8 +369,7 @@ docker-compose exec postgres psql -U loggplattform -d loggplattform -c "SELECT 1
 | `ADMIN_API_KEY` | **Obligatorisk** - Admin API-nyckel | - |
 | `BACKEND_PORT` | Backend-port | 3001 |
 | `WEBUI_PORT` | Web UI-port | 8080 |
-| `DATABASE_URL` | PostgreSQL-anslutning (tom = SQLite) | - |
-| `DB_PATH` | SQLite-filsökväg | ./data/logs.db |
+| `DATABASE_URL` | PostgreSQL-anslutning (**obligatorisk** utanför docker-compose) | byggs av `POSTGRES_*` i compose |
 | `POSTGRES_USER` | PostgreSQL-användare | loggplattform |
 | `POSTGRES_PASSWORD` | PostgreSQL-lösenord | - |
 | `POSTGRES_DB` | PostgreSQL-databas | loggplattform |

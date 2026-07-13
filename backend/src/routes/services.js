@@ -25,10 +25,8 @@ router.post('/', async (req, res) => {
       [serviceId, name, apiKey],
       function(err) {
         if (err) {
-          // Handle unique constraint violations (SQLite and PostgreSQL)
-          if (err.message.includes('UNIQUE constraint') || 
-              err.message.includes('duplicate key') ||
-              err.code === '23505') {
+          // Handle unique constraint violations
+          if (err.message.includes('duplicate key') || err.code === '23505') {
             return res.status(409).json({ error: 'Service name already exists' });
           }
           logger.error({ err }, 'Database error creating service');
