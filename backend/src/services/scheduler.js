@@ -1,85 +1,41 @@
 const cron = require('node-cron');
-const { archiveOldLogs, cleanupOldArchives } = require('./archive');
+const { getPool } = require('./../database');
+const { createCheckpoint } = require('./checkpoints');
 const logger = require('../logger');
 
-const ARCHIVE_SCHEDULE = process.env.ARCHIVE_SCHEDULE || '0 2 * * *'; // Daily at 2 AM
-const CLEANUP_SCHEDULE = process.env.CLEANUP_SCHEDULE || '0 3 * * *'; // Daily at 3 AM
-const ARCHIVE_DAYS_OLD = parseInt(process.env.ARCHIVE_DAYS_OLD || '1');
+const CHECKPOINT_SCHEDULE = process.env.CHECKPOINT_SCHEDULE || '0 2 * * *'; // Daily at 02:00 UTC
 
-let archiveTask = null;
-let cleanupTask = null;
+let checkpointTask = null;
 
-/**
- * Start scheduled archive and cleanup jobs
- */
-function startScheduler() {
-  logger.info({
-    archiveSchedule: ARCHIVE_SCHEDULE,
-    cleanupSchedule: CLEANUP_SCHEDULE,
-    archiveDaysOld: ARCHIVE_DAYS_OLD
-  }, 'Starting archive scheduler');
-  
-  // Schedule daily archive job
-  archiveTask = cron.schedule(ARCHIVE_SCHEDULE, async () => {
-    try {
-      logger.info('Running scheduled archive job');
-      await archiveOldLogs(ARCHIVE_DAYS_OLD);
-    } catch (error) {
-      logger.error({ err: error }, 'Scheduled archive job failed');
-    }
-  }, {
-    scheduled: true,
-    timezone: 'UTC'
-  });
-  
-  // Schedule daily cleanup job
-  cleanupTask = cron.schedule(CLEANUP_SCHEDULE, async () => {
-    try {
-      logger.info('Running scheduled cleanup job');
-      await cleanupOldArchives();
-    } catch (error) {
-      logger.error({ err: error }, 'Scheduled cleanup job failed');
-    }
-  }, {
-    scheduled: true,
-    timezone: 'UTC'
-  });
-  
-  logger.info('Scheduler started successfully');
+/** Sign a checkpoint for every tenant that has events. */
+async function runCheckpointJob() {
+  const { rows } = await getPool().query('SELECT DISTINCT tenant_id FROM events');
+  let created = 0;
+  for (const row of rows) {
+    const cp = await createCheckpoint(row.tenant_id);
+    if (cp) created++;
+  }
+  logger.info({ created }, 'Checkpoint job complete');
+  return created;
 }
 
-/**
- * Stop scheduled jobs
- */
+function startScheduler() {
+  logger.info({ checkpointSchedule: CHECKPOINT_SCHEDULE }, 'Starting checkpoint scheduler');
+  checkpointTask = cron.schedule(CHECKPOINT_SCHEDULE, async () => {
+    try {
+      await runCheckpointJob();
+    } catch (error) {
+      logger.error({ err: error }, 'Scheduled checkpoint job failed');
+    }
+  }, { scheduled: true, timezone: 'UTC' });
+}
+
 function stopScheduler() {
-  if (archiveTask) {
-    archiveTask.stop();
-    archiveTask = null;
-  }
-  if (cleanupTask) {
-    cleanupTask.stop();
-    cleanupTask = null;
+  if (checkpointTask) {
+    checkpointTask.stop();
+    checkpointTask = null;
   }
   logger.info('Scheduler stopped');
 }
 
-/**
- * Run archive job manually (for testing)
- */
-async function runArchiveNow() {
-  try {
-    logger.info('Running manual archive job');
-    const count = await archiveOldLogs(ARCHIVE_DAYS_OLD);
-    logger.info({ count }, 'Manual archive complete');
-    return count;
-  } catch (error) {
-    logger.error({ err: error }, 'Manual archive job failed');
-    throw error;
-  }
-}
-
-module.exports = {
-  startScheduler,
-  stopScheduler,
-  runArchiveNow
-};
+module.exports = { startScheduler, stopScheduler, runCheckpointJob };

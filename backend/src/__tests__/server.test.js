@@ -1,6 +1,6 @@
 const request = require('supertest');
 const express = require('express');
-const { getDatabase } = require('../database');
+const { getPool } = require('../database');
 
 jest.mock('../database');
 
@@ -9,26 +9,14 @@ describe('Server Health Check', () => {
 
   beforeEach(() => {
     app = express();
-    
-    // Mock the health check route
+
+    // Mirror of the /health route in server.js
     app.get('/health', async (req, res) => {
       try {
-        const db = getDatabase();
-        
-        await new Promise((resolve, reject) => {
-          db.get('SELECT 1', [], (err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        
-        res.json({ 
-          status: 'ok',
-          database: 'connected',
-          timestamp: new Date().toISOString()
-        });
+        await getPool().query('SELECT 1');
+        res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
       } catch (error) {
-        res.status(503).json({ 
+        res.status(503).json({
           status: 'error',
           database: 'disconnected',
           error: error.message,
@@ -42,37 +30,18 @@ describe('Server Health Check', () => {
     jest.clearAllMocks();
   });
 
-  test('should return healthy status when database is connected', async () => {
-    const mockDb = {
-      get: jest.fn((query, params, callback) => {
-        callback(null, { '1': 1 });
-      })
-    };
-    getDatabase.mockReturnValue(mockDb);
-
-    const response = await request(app)
-      .get('/health')
-      .expect(200);
-
-    expect(response.body.status).toBe('ok');
-    expect(response.body.database).toBe('connected');
-    expect(response.body).toHaveProperty('timestamp');
+  test('returns ok when the database responds', async () => {
+    getPool.mockReturnValue({ query: jest.fn().mockResolvedValue({ rows: [] }) });
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.database).toBe('connected');
   });
 
-  test('should return unhealthy status when database is disconnected', async () => {
-    const mockDb = {
-      get: jest.fn((query, params, callback) => {
-        callback(new Error('Database connection failed'), null);
-      })
-    };
-    getDatabase.mockReturnValue(mockDb);
-
-    const response = await request(app)
-      .get('/health')
-      .expect(503);
-
-    expect(response.body.status).toBe('error');
-    expect(response.body.database).toBe('disconnected');
-    expect(response.body).toHaveProperty('error');
+  test('returns 503 when the database is unreachable', async () => {
+    getPool.mockReturnValue({ query: jest.fn().mockRejectedValue(new Error('down')) });
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(503);
+    expect(res.body.database).toBe('disconnected');
   });
 });

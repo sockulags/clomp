@@ -1,12 +1,7 @@
 jest.mock('../logger', () => ({
-  info: jest.fn(),
-  error: jest.fn(),
-  warn: jest.fn(),
-  debug: jest.fn(),
-  fatal: jest.fn()
+  info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(), fatal: jest.fn()
 }));
 
-// Shared pg mocks
 const mockPgClient = {
   query: jest.fn(),
   release: jest.fn()
@@ -22,7 +17,9 @@ jest.mock('pg', () => ({
   Pool: jest.fn(() => mockPgPool)
 }));
 
-describe('Database', () => {
+const TENANT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+describe('database', () => {
   let database;
 
   beforeEach(async () => {
@@ -30,9 +27,13 @@ describe('Database', () => {
     jest.resetModules();
     process.env.DATABASE_URL = 'postgresql://user:secret@localhost:5432/testdb';
     mockPgPool.connect.mockResolvedValue(mockPgClient);
-    mockPgPool.query.mockResolvedValue({ rows: [], rowCount: 0 });
     mockPgPool.end.mockResolvedValue(undefined);
-    mockPgClient.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    mockPgClient.query.mockImplementation(async (sql) => {
+      if (typeof sql === 'string' && sql.startsWith('SELECT id FROM tenants')) {
+        return { rows: [{ id: TENANT_ID }] };
+      }
+      return { rows: [], rowCount: 0 };
+    });
 
     database = require('../database');
     await database.initDatabase();
@@ -42,18 +43,22 @@ describe('Database', () => {
     delete process.env.DATABASE_URL;
   });
 
-  test('initDatabase creates tables and indexes', () => {
+  test('initDatabase creates the events schema with append-only trigger', () => {
     expect(mockPgPool.connect).toHaveBeenCalled();
-    expect(mockPgClient.query).toHaveBeenCalledWith(
-      expect.stringContaining('CREATE TABLE IF NOT EXISTS services')
-    );
-    expect(mockPgClient.query).toHaveBeenCalledWith(
-      expect.stringContaining('CREATE TABLE IF NOT EXISTS logs')
-    );
-    expect(mockPgClient.query).toHaveBeenCalledWith(
-      expect.stringContaining('idx_logs_correlation_id')
-    );
+    const schemaSql = mockPgClient.query.mock.calls[0][0];
+    expect(schemaSql).toContain('CREATE TABLE IF NOT EXISTS events');
+    expect(schemaSql).toContain('CREATE TABLE IF NOT EXISTS checkpoints');
+    expect(schemaSql).toContain('CREATE TABLE IF NOT EXISTS users');
+    expect(schemaSql).toContain('events are append-only');
+    expect(schemaSql).toContain('BEFORE UPDATE OR DELETE ON events');
     expect(mockPgClient.release).toHaveBeenCalled();
+  });
+
+  test('initDatabase ensures the default tenant and exposes its id', () => {
+    expect(database.getDefaultTenantId()).toBe(TENANT_ID);
+    const insertCall = mockPgClient.query.mock.calls.find(c => String(c[0]).includes('INSERT INTO tenants'));
+    expect(insertCall).toBeTruthy();
+    expect(String(insertCall[0])).toContain('ON CONFLICT (name) DO NOTHING');
   });
 
   test('initDatabase throws without DATABASE_URL', async () => {
@@ -63,100 +68,23 @@ describe('Database', () => {
     await expect(freshDatabase.initDatabase()).rejects.toThrow(/DATABASE_URL/);
   });
 
-  test('getPool returns the shared pool', () => {
-    expect(database.getPool()).toBe(mockPgPool);
-  });
-
-  test('getPool throws if pool is not initialized', () => {
+  test('getPool/getDefaultTenantId throw before initialization', () => {
     jest.resetModules();
     const freshDatabase = require('../database');
     expect(() => freshDatabase.getPool()).toThrow(/not initialized/);
+    expect(() => freshDatabase.getDefaultTenantId()).toThrow(/not initialized/);
   });
 
-  test('initDatabase rejects when connection fails', async () => {
+  test('initDatabase rejects when the connection fails', async () => {
     jest.resetModules();
     mockPgPool.connect.mockRejectedValueOnce(new Error('connection refused'));
     const freshDatabase = require('../database');
     await expect(freshDatabase.initDatabase()).rejects.toThrow('connection refused');
   });
 
-  test('run converts placeholders and reports changes', (done) => {
-    mockPgPool.query.mockResolvedValue({ rows: [], rowCount: 2 });
-    const db = database.getDatabase();
-
-    db.run('UPDATE logs SET level = ? WHERE service = ?', ['info', 'svc'], function (err) {
-      expect(err).toBeNull();
-      expect(this.changes).toBe(2);
-      expect(mockPgPool.query).toHaveBeenCalledWith(
-        'UPDATE logs SET level = $1 WHERE service = $2',
-        ['info', 'svc']
-      );
-      done();
-    });
-  });
-
-  test('run passes errors to the callback', (done) => {
-    mockPgPool.query.mockRejectedValue(new Error('boom'));
-    const db = database.getDatabase();
-
-    db.run('DELETE FROM logs WHERE id = ?', ['x'], (err) => {
-      expect(err).toBeInstanceOf(Error);
-      done();
-    });
-  });
-
-  test('get returns the first row or null', (done) => {
-    mockPgPool.query.mockResolvedValue({ rows: [{ id: 'a' }], rowCount: 1 });
-    const db = database.getDatabase();
-
-    db.get('SELECT * FROM logs WHERE id = ?', ['a'], (err, row) => {
-      expect(err).toBeNull();
-      expect(row).toEqual({ id: 'a' });
-
-      mockPgPool.query.mockResolvedValue({ rows: [], rowCount: 0 });
-      db.get('SELECT * FROM logs WHERE id = ?', ['b'], (err2, row2) => {
-        expect(err2).toBeNull();
-        expect(row2).toBeNull();
-        done();
-      });
-    });
-  });
-
-  test('get passes errors to the callback', (done) => {
-    mockPgPool.query.mockRejectedValue(new Error('boom'));
-    const db = database.getDatabase();
-
-    db.get('SELECT 1', [], (err, row) => {
-      expect(err).toBeInstanceOf(Error);
-      expect(row).toBeNull();
-      done();
-    });
-  });
-
-  test('all returns all rows', (done) => {
-    mockPgPool.query.mockResolvedValue({ rows: [{ id: 'a' }, { id: 'b' }], rowCount: 2 });
-    const db = database.getDatabase();
-
-    db.all('SELECT * FROM logs WHERE service = ?', ['svc'], (err, rows) => {
-      expect(err).toBeNull();
-      expect(rows).toHaveLength(2);
-      done();
-    });
-  });
-
-  test('all passes errors to the callback', (done) => {
-    mockPgPool.query.mockRejectedValue(new Error('boom'));
-    const db = database.getDatabase();
-
-    db.all('SELECT 1', [], (err, rows) => {
-      expect(err).toBeInstanceOf(Error);
-      expect(rows).toBeNull();
-      done();
-    });
-  });
-
-  test('closeDatabase ends the pool', async () => {
+  test('closeDatabase ends the pool and resets state', async () => {
     await database.closeDatabase();
     expect(mockPgPool.end).toHaveBeenCalled();
+    expect(() => database.getPool()).toThrow(/not initialized/);
   });
 });
