@@ -1,46 +1,60 @@
 const axios = require('axios');
 
-// Track live SDK instances so the optional shutdown handlers can flush them all
-const sdkInstances = new Set();
+// Track live client instances so the optional shutdown handlers can flush them all
+const clientInstances = new Set();
 let shutdownHandlersRegistered = false;
 
-class LoggplattformSDK {
+/**
+ * clomp Node.js client — records tamper-evident audit events.
+ *
+ * const Clomp = require('@clomp/sdk-node');
+ * const clomp = new Clomp({
+ *   apiUrl: 'http://localhost:3001',
+ *   apiKey: 'clomp_live_...',
+ *   defaultActor: { type: 'service', id: 'billing-api' }
+ * });
+ * clomp.record('access.revoked', { target: { type: 'user', id: 'u-42' } });
+ * await clomp.flush();
+ */
+class Clomp {
   constructor(options = {}) {
-    this.apiUrl = options.apiUrl || process.env.LOGGPLATTFORM_API_URL || 'http://localhost:3000';
-    this.apiKey = options.apiKey || process.env.LOGGPLATTFORM_API_KEY;
-    this.service = options.service || process.env.LOGGPLATTFORM_SERVICE || 'default-service';
-    this.environment = options.environment || process.env.NODE_ENV || 'development';
-    this.correlationId = options.correlationId;
+    this.apiUrl = (options.apiUrl || process.env.CLOMP_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    this.apiKey = options.apiKey || process.env.CLOMP_API_KEY;
+    this.defaultActor = options.defaultActor || null;
 
     if (!this.apiKey) {
-      console.warn('Loggplattform SDK: No API key provided. Logs will not be sent.');
+      console.warn('clomp SDK: No API key provided. Events will not be sent.');
     }
 
-    // Queue for async log sending
-    this.logQueue = [];
-    this.flushInterval = options.flushInterval || 5000; // 5 seconds
-    this.batchSize = options.batchSize || 10;
+    // FIFO queue: arrival order at the server defines chain order, so events
+    // are always sent one at a time, oldest first.
+    this.queue = [];
+    this.maxQueueLength = options.maxQueueLength || 1000;
+    this.flushInterval = options.flushInterval ?? 2000;
+    this.timeoutMs = options.timeoutMs || 10000;
+    this._flushing = null;
 
     // Start periodic flush. The timer is unref'd so the SDK never keeps the
     // host process alive on its own.
     if (this.flushInterval > 0) {
-      this.flushTimer = setInterval(() => this.flush(), this.flushInterval);
+      this.flushTimer = setInterval(() => {
+        this.flush().catch(() => {});
+      }, this.flushInterval);
       if (typeof this.flushTimer.unref === 'function') {
         this.flushTimer.unref();
       }
     }
 
-    // Register this instance for the optional shutdown handlers
-    sdkInstances.add(this);
+    clientInstances.add(this);
   }
 
   /**
-   * Optionally register SIGINT/SIGTERM handlers that flush all SDK instances
-   * before the process terminates.
+   * Optionally register SIGINT/SIGTERM handlers that flush all client
+   * instances before the process terminates.
    *
-   * This is opt-in: the SDK never installs process-wide handlers on its own,
-   * and the handlers never call process.exit(). After flushing (max 2 seconds),
-   * the signal is re-raised so the default termination behavior is preserved.
+   * Opt-in: the SDK never installs process-wide handlers on its own, and the
+   * handlers never call process.exit(). After flushing (max 2 seconds), the
+   * signal is re-raised so the default termination behavior is preserved.
    */
   static registerShutdownHandlers() {
     if (shutdownHandlersRegistered) {
@@ -49,15 +63,13 @@ class LoggplattformSDK {
     shutdownHandlersRegistered = true;
 
     const flushAll = async () => {
-      const flushPromises = Array.from(sdkInstances).map(instance =>
+      const flushPromises = Array.from(clientInstances).map(instance =>
         instance.destroy().catch(err => {
-          if (process.env.LOGGPLATTFORM_DEBUG) {
-            console.error('Loggplattform SDK: Error flushing logs on shutdown:', err.message);
+          if (process.env.CLOMP_DEBUG) {
+            console.error('clomp SDK: Error flushing events on shutdown:', err.message);
           }
         })
       );
-
-      // Wait up to 2 seconds for the flush to complete
       await Promise.race([
         Promise.all(flushPromises),
         new Promise(resolve => setTimeout(resolve, 2000))
@@ -67,173 +79,110 @@ class LoggplattformSDK {
     for (const signal of ['SIGINT', 'SIGTERM']) {
       process.once(signal, async () => {
         await flushAll();
-        // Re-raise the signal so the default handler terminates the process.
-        // The SDK itself never calls process.exit().
         process.kill(process.pid, signal);
       });
     }
   }
 
-  _createLogEntry(level, message, context = {}) {
-    return {
-      level,
-      message,
-      context: {
-        ...context,
-        environment: this.environment,
-        service: this.service
-      },
-      correlation_id: this.correlationId || context.correlation_id
-    };
-  }
-
-  _queueLog(logEntry) {
-    try {
-      this.logQueue.push(logEntry);
-
-      // Auto-flush if queue reaches batch size
-      if (this.logQueue.length >= this.batchSize) {
-        this.flush();
-      }
-    } catch (error) {
-      // SDK errors should never crash the app
-      console.error('Loggplattform SDK: Failed to queue log:', error.message);
-    }
-  }
-
-  async flush() {
-    if (this.logQueue.length === 0 || !this.apiKey) {
-      return;
-    }
-
-    // Use batch endpoint if available, otherwise send individually
-    const logsToSend = this.logQueue.splice(0, this.batchSize);
-
-    try {
-      // Try batch endpoint first
-      await this._sendBatchLogs(logsToSend);
-    } catch (batchError) {
-      // Fallback to individual sends if batch fails
-      // Log for operational visibility if debug is enabled or NODE_ENV is development
-      if (process.env.LOGGPLATTFORM_DEBUG || process.env.NODE_ENV === 'development') {
-        console.warn('Loggplattform SDK: Batch send failed, falling back to individual sends:', batchError.message);
-      }
-      const promises = logsToSend.map(logEntry => this._sendLog(logEntry));
-      await Promise.allSettled(promises);
-    }
-  }
-
-  async _sendBatchLogs(logEntries) {
-    if (!this.apiKey || logEntries.length === 0) {
-      return;
-    }
-
-    try {
-      await axios.post(
-        `${this.apiUrl}/api/logs/batch`,
-        { logs: logEntries },
-        {
-          headers: {
-            'X-API-Key': this.apiKey,
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000 // 10 second timeout for batches
-        }
-      );
-    } catch (error) {
-      // SDK errors should never crash the app
-      if (process.env.LOGGPLATTFORM_DEBUG) {
-        console.error('Loggplattform SDK: Failed to send batch logs:', error.message);
-      }
-      throw error; // Re-throw to trigger fallback
-    }
-  }
-
   /**
-   * Non-blocking flush trigger (kept for backwards compatibility).
+   * Queue an audit event.
    *
-   * This method triggers an asynchronous fire-and-forget flush and returns
-   * immediately. For guaranteed delivery, call `await flush()` instead.
+   * @param {string} action - namespaced action, e.g. "access.review.completed"
+   * @param {object} [fields]
+   * @param {object} [fields.actor]   - { type, id, ... }; falls back to defaultActor
+   * @param {object} [fields.target]  - { type, id, ... }
+   * @param {object} [fields.context] - free-form metadata
+   * @param {Array}  [fields.evidence] - [{ filename, sha256, size }]
+   * @param {string|Date} [fields.occurredAt] - when it happened (default: now)
    */
-  flushSync() {
-    // Trigger an asynchronous flush without waiting for completion
-    // (fire-and-forget, non-blocking)
-    this.flush().catch(err => {
-      if (process.env.LOGGPLATTFORM_DEBUG) {
-        console.error('Loggplattform SDK: Error in flushSync:', err.message);
+  record(action, fields = {}) {
+    try {
+      const actor = fields.actor || this.defaultActor;
+      if (!action || !actor || !actor.type || !actor.id) {
+        throw new Error('record() needs an action and an actor with { type, id } (or a defaultActor)');
       }
-    });
+
+      const event = {
+        action,
+        actor,
+        target: fields.target,
+        context: fields.context,
+        evidence: fields.evidence,
+        occurred_at: fields.occurredAt ? new Date(fields.occurredAt).toISOString() : undefined
+      };
+
+      if (this.queue.length >= this.maxQueueLength) {
+        // Drop the oldest event rather than growing without bound; an audit
+        // SDK must never take the host application down with it.
+        this.queue.shift();
+        if (process.env.CLOMP_DEBUG) {
+          console.warn('clomp SDK: queue full, dropped oldest event');
+        }
+      }
+      this.queue.push(event);
+    } catch (error) {
+      // SDK errors should never crash the app
+      console.error('clomp SDK: Failed to queue event:', error.message);
+    }
   }
 
-  async _sendLog(logEntry) {
-    if (!this.apiKey) {
-      return;
-    }
+  /**
+   * Send all queued events, oldest first. Events that fail to send stay at
+   * the front of the queue and are retried on the next flush.
+   */
+  async flush() {
+    if (this._flushing) return this._flushing;
+    this._flushing = this._drain().finally(() => {
+      this._flushing = null;
+    });
+    return this._flushing;
+  }
 
-    try {
-      await axios.post(
-        `${this.apiUrl}/api/logs`,
-        logEntry,
-        {
+  async _drain() {
+    if (!this.apiKey) return;
+
+    while (this.queue.length > 0) {
+      const event = this.queue[0];
+      try {
+        await axios.post(`${this.apiUrl}/api/events`, event, {
           headers: {
             'X-API-Key': this.apiKey,
             'Content-Type': 'application/json'
           },
-          timeout: 5000
+          timeout: this.timeoutMs
+        });
+        this.queue.shift();
+      } catch (error) {
+        const status = error.response?.status;
+        if (status && status >= 400 && status < 500 && status !== 429) {
+          // Rejected permanently (validation/auth) — drop it, don't wedge the queue.
+          this.queue.shift();
+          if (process.env.CLOMP_DEBUG) {
+            console.error(`clomp SDK: event rejected (${status}):`, error.response?.data?.error || error.message);
+          }
+        } else {
+          // Network trouble or rate limit — keep the event and retry later.
+          if (process.env.CLOMP_DEBUG) {
+            console.error('clomp SDK: send failed, will retry:', error.message);
+          }
+          break;
         }
-      );
-    } catch (error) {
-      // SDK errors should never crash the app
-      // Silently fail - logs are best-effort
-      if (process.env.LOGGPLATTFORM_DEBUG) {
-        console.error('Loggplattform SDK: Failed to send log:', error.message);
       }
     }
   }
 
-
-  info(message, context = {}) {
-    this._queueLog(this._createLogEntry('info', message, context));
-  }
-
-  warn(message, context = {}) {
-    this._queueLog(this._createLogEntry('warn', message, context));
-  }
-
-  error(message, context = {}) {
-    this._queueLog(this._createLogEntry('error', message, context));
-  }
-
-  debug(message, context = {}) {
-    this._queueLog(this._createLogEntry('debug', message, context));
-  }
-
-  setCorrelationId(correlationId) {
-    this.correlationId = correlationId;
-  }
-
   /**
-   * Destroy the SDK instance: stop the flush timer and flush pending logs.
-   *
-   * Await this method during application shutdown to ensure all queued
-   * logs are delivered:
-   *
-   *   await sdk.destroy();
-   *
-   * @returns {Promise<void>} A promise that resolves when logs are flushed
+   * Destroy the client: stop the flush timer and flush pending events.
+   * Await this during application shutdown to ensure delivery.
    */
   async destroy() {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
-      this.flushTimer = undefined;
+      this.flushTimer = null;
     }
-    // Remove this instance from the set
-    sdkInstances.delete(this);
-    // Flush until the queue is drained
-    while (this.apiKey && this.logQueue.length > 0) {
-      await this.flush();
-    }
+    clientInstances.delete(this);
+    await this.flush();
   }
 }
 
-module.exports = LoggplattformSDK;
+module.exports = Clomp;

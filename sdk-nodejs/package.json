@@ -1,18 +1,15 @@
 {
-  "name": "@loggplattform/sdk-nodejs",
-  "version": "1.0.0",
-  "description": "Node.js SDK for Loggplattform central logging platform",
+  "name": "@clomp/sdk-node",
+  "version": "0.1.0",
+  "description": "Node.js client for clomp — tamper-evident audit trail for security work",
   "main": "src/index.js",
   "scripts": {
     "test": "node test/test.js"
   },
-  "keywords": ["logging", "sdk", "nodejs"],
-  "author": "",
+  "keywords": ["audit-trail", "tamper-evident", "compliance", "soc2", "nis2", "sdk"],
+  "author": "Lucas Skog",
   "license": "MIT",
   "dependencies": {
     "axios": "^1.6.0"
-  },
-  "devDependencies": {
-    "uuid": "^9.0.1"
   }
 }
