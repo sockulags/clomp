@@ -1,262 +1,168 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import axios from 'axios';
 import App from '../src/App';
+import api from '../src/api';
 
-// Mock axios
-vi.mock('axios');
+vi.mock('../src/api', () => {
+  const api = {
+    me: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    verify: vi.fn(),
+    catalog: vi.fn(),
+    events: vi.fn(),
+    createEvent: vi.fn(),
+    uploadEvidence: vi.fn(),
+    users: vi.fn(),
+    createUser: vi.fn(),
+    patchUser: vi.fn(),
+    resetPassword: vi.fn(),
+    keys: vi.fn(),
+    createKey: vi.fn(),
+    revokeKey: vi.fn(),
+    totpSetup: vi.fn(),
+    totpEnable: vi.fn(),
+    totpDisable: vi.fn()
+  };
+  return {
+    api,
+    default: api,
+    exportUrls: {
+      jsonl: () => '/api/export/jsonl',
+      report: () => '/api/export/report'
+    }
+  };
+});
+
+const EDITOR = { id: 'u1', email: 'lucas@example.com', name: 'Lucas', role: 'editor' };
+const AUDITOR = { id: 'u2', email: 'rev@example.com', name: 'Revisorn', role: 'auditor' };
+const ADMIN = { id: 'u3', email: 'admin@example.com', name: 'Anna Admin', role: 'admin' };
+
+const EVENT = {
+  id: 'e1', sequence: 1, action: 'patch.applied',
+  actor: { type: 'user', id: 'lucas' }, target: { type: 'system', id: 'web-01' },
+  occurred_at: '2026-07-13T10:00:00.000Z', recorded_at: '2026-07-13T10:00:01.000Z',
+  context: null, evidence: null,
+  prev_hash: '0'.repeat(64), hash: 'a'.repeat(64)
+};
+
+// 'patch.applied' appears both as a filter <option> and a ledger cell — scope to the cell.
+async function findLedgerCell() {
+  const matches = await screen.findAllByText('patch.applied');
+  return matches.find(el => el.tagName === 'TD');
+}
+
+function primeLoggedIn(user) {
+  api.me.mockResolvedValue({ data: { user } });
+  api.verify.mockResolvedValue({ data: { intact: true, verified: 1, checkpoint: null } });
+  api.catalog.mockResolvedValue({ data: { actions: [{ action: 'patch.applied', title: 'Patch applied', soc2: ['CC7.1'], nis2: ['21.2(e)'] }] } });
+  api.events.mockResolvedValue({ data: { events: [EVENT], has_more: false, next_before_sequence: null } });
+}
 
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.getItem.mockReturnValue(null);
-    // Default mock for empty logs
-    axios.get.mockResolvedValue({ data: { logs: [] } });
   });
 
-  it('renders header with title', async () => {
+  it('shows the login screen when there is no session', async () => {
+    api.me.mockRejectedValue({ response: { status: 401 } });
     render(<App />);
-    expect(screen.getByText('📦 Loggplattform')).toBeInTheDocument();
+    expect(await screen.findByText('Sign in')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Email/)).toBeInTheDocument();
   });
 
-  it('renders API key input field', async () => {
+  it('logs in and shows the ledger with the chain badge', async () => {
+    primeLoggedIn(EDITOR);
+    api.me.mockRejectedValueOnce({ response: { status: 401 } });
+    api.login.mockResolvedValue({ data: { user: EDITOR } });
+
     render(<App />);
-    expect(screen.getByPlaceholderText('API-nyckel')).toBeInTheDocument();
-  });
-
-  it('renders filter controls', async () => {
-    render(<App />);
-    expect(screen.getByText('Alla nivåer')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Korrelations-ID')).toBeInTheDocument();
-    expect(screen.getByText('🔄 Uppdatera')).toBeInTheDocument();
-  });
-
-  it('shows loading state initially', async () => {
-    render(<App />);
-    expect(screen.getByText('Laddar loggar...')).toBeInTheDocument();
-  });
-
-  it('shows "no logs" message when API returns empty array', async () => {
-    axios.get.mockResolvedValue({ data: { logs: [] } });
-    render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('Inga loggar hittades')).toBeInTheDocument();
-    });
-  });
-
-  it('displays logs from API', async () => {
-    const mockLogs = [
-      {
-        id: '123',
-        level: 'info',
-        message: 'Test log message',
-        timestamp: '2024-01-15T10:30:00.000Z',
-        service: 'test-service',
-        correlation_id: null,
-        context: null
-      }
-    ];
-    axios.get.mockResolvedValue({ data: { logs: mockLogs } });
-    
-    render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test log message')).toBeInTheDocument();
-    });
-    expect(screen.getByText('INFO')).toBeInTheDocument();
-  });
-
-  it('displays error level logs with correct styling', async () => {
-    const mockLogs = [
-      {
-        id: '456',
-        level: 'error',
-        message: 'Error occurred',
-        timestamp: '2024-01-15T10:30:00.000Z',
-        service: 'test-service',
-        correlation_id: null,
-        context: null
-      }
-    ];
-    axios.get.mockResolvedValue({ data: { logs: mockLogs } });
-    
-    render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('ERROR')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Error occurred')).toBeInTheDocument();
-  });
-
-  it('displays correlation ID when present', async () => {
-    const mockLogs = [
-      {
-        id: '789',
-        level: 'info',
-        message: 'Log with correlation',
-        timestamp: '2024-01-15T10:30:00.000Z',
-        service: 'test-service',
-        correlation_id: 'corr-123',
-        context: null
-      }
-    ];
-    axios.get.mockResolvedValue({ data: { logs: mockLogs } });
-    
-    render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('🔗 corr-123')).toBeInTheDocument();
-    });
-  });
-
-  it('saves API key to localStorage', async () => {
     const user = userEvent.setup();
-    render(<App />);
-    
-    const apiKeyInput = screen.getByPlaceholderText('API-nyckel');
-    await user.clear(apiKeyInput);
-    await user.type(apiKeyInput, 'my-api-key');
-    
-    expect(localStorage.setItem).toHaveBeenCalledWith('apiKey', expect.stringContaining('my-api-key'));
+    await user.type(await screen.findByLabelText(/Email/), 'lucas@example.com');
+    await user.type(screen.getByLabelText(/Password/), 'pw');
+    await user.click(screen.getByText('Sign in'));
+
+    expect(await findLedgerCell()).toBeInTheDocument();
+    expect(await screen.findByText(/chain intact · 1 events/)).toBeInTheDocument();
+    expect(api.login).toHaveBeenCalledWith('lucas@example.com', 'pw', undefined);
   });
 
-  it('loads API key from localStorage on mount', async () => {
-    localStorage.getItem.mockReturnValue('saved-key');
-    render(<App />);
-    
-    const apiKeyInput = screen.getByPlaceholderText('API-nyckel');
-    expect(apiKeyInput.value).toBe('saved-key');
-  });
+  it('asks for a TOTP code when the server requires one', async () => {
+    api.me.mockRejectedValue({ response: { status: 401 } });
+    api.login.mockRejectedValueOnce({ response: { data: { totp_required: true, error: 'TOTP code required' } } });
 
-  it('opens log detail panel when clicking a log', async () => {
-    const mockLogs = [
-      {
-        id: 'detail-log-1',
-        level: 'info',
-        message: 'Click me',
-        timestamp: '2024-01-15T10:30:00.000Z',
-        service: 'detail-service',
-        correlation_id: null,
-        context: { key: 'value' }
-      }
-    ];
-    axios.get.mockResolvedValue({ data: { logs: mockLogs } });
-    
     render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('Click me')).toBeInTheDocument();
-    });
-    
-    fireEvent.click(screen.getByText('Click me'));
-    
-    expect(screen.getByText('Logg Detaljer')).toBeInTheDocument();
-    expect(screen.getByText('detail-service')).toBeInTheDocument();
-  });
-
-  it('closes log detail panel when clicking close button', async () => {
-    const mockLogs = [
-      {
-        id: 'close-test',
-        level: 'info',
-        message: 'Test log',
-        timestamp: '2024-01-15T10:30:00.000Z',
-        service: 'test-service',
-        correlation_id: null,
-        context: null
-      }
-    ];
-    axios.get.mockResolvedValue({ data: { logs: mockLogs } });
-    
-    render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('Test log')).toBeInTheDocument();
-    });
-    
-    fireEvent.click(screen.getByText('Test log'));
-    expect(screen.getByText('Logg Detaljer')).toBeInTheDocument();
-    
-    fireEvent.click(screen.getByText('✕'));
-    expect(screen.queryByText('Logg Detaljer')).not.toBeInTheDocument();
-  });
-
-  it('updates level filter when changed', async () => {
     const user = userEvent.setup();
-    axios.get.mockResolvedValue({ data: { logs: [] } });
-    
-    render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.queryByText('Laddar loggar...')).not.toBeInTheDocument();
-    });
-    
-    const levelSelect = screen.getByRole('combobox');
-    await user.selectOptions(levelSelect, 'error');
-    
-    await waitFor(() => {
-      expect(axios.get).toHaveBeenCalledWith(
-        expect.stringContaining('level=error'),
-        expect.anything()
-      );
-    });
+    await user.type(await screen.findByLabelText(/Email/), 'lucas@example.com');
+    await user.type(screen.getByLabelText(/Password/), 'pw');
+    await user.click(screen.getByText('Sign in'));
+
+    expect(await screen.findByLabelText(/TOTP \/ recovery code/)).toBeInTheDocument();
   });
 
-  it('sends API key in request headers', async () => {
-    localStorage.getItem.mockReturnValue('test-api-key');
-    axios.get.mockResolvedValue({ data: { logs: [] } });
-    
+  it('restores an existing session and scopes tabs by role: auditor', async () => {
+    primeLoggedIn(AUDITOR);
     render(<App />);
-    
-    await waitFor(() => {
-      expect(axios.get).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: { 'X-API-Key': 'test-api-key' }
-        })
-      );
-    });
+
+    expect(await findLedgerCell()).toBeInTheDocument();
+    expect(screen.getByText('Ledger')).toBeInTheDocument();
+    expect(screen.getByText('Export')).toBeInTheDocument();
+    expect(screen.queryByText('Record')).not.toBeInTheDocument();
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument();
   });
 
-  it('shows alert on 401 unauthorized error', async () => {
-    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    axios.get.mockRejectedValue({ response: { status: 401 } });
-    
+  it('shows all tabs for admins', async () => {
+    primeLoggedIn(ADMIN);
     render(<App />);
-    
-    await waitFor(() => {
-      expect(alertMock).toHaveBeenCalledWith('Invalid API key');
-    });
-    
-    alertMock.mockRestore();
+    await findLedgerCell();
+    expect(screen.getByText('Record')).toBeInTheDocument();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
   });
 
-  it('displays log context in detail view', async () => {
-    const mockLogs = [
-      {
-        id: 'context-log',
-        level: 'info',
-        message: 'Log with context',
-        timestamp: '2024-01-15T10:30:00.000Z',
-        service: 'test-service',
-        correlation_id: null,
-        context: { userId: '123', action: 'login' }
-      }
-    ];
-    axios.get.mockResolvedValue({ data: { logs: mockLogs } });
-    
+  it('expands an event row to show hashes', async () => {
+    primeLoggedIn(EDITOR);
     render(<App />);
-    
-    await waitFor(() => {
-      expect(screen.getByText('Log with context')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(await findLedgerCell());
+    expect(screen.getByText('a'.repeat(64))).toBeInTheDocument();
+  });
+
+  it('warns loudly when the chain is broken', async () => {
+    primeLoggedIn(EDITOR);
+    api.verify.mockResolvedValue({ data: { intact: false, verified: 3, firstBreak: 4, checkpoint: null } });
+    render(<App />);
+    expect(await screen.findByText(/CHAIN BROKEN at #4/)).toBeInTheDocument();
+  });
+
+  it('records an event from the Record view', async () => {
+    primeLoggedIn(EDITOR);
+    api.createEvent.mockResolvedValue({
+      data: { event: { sequence: 2, hash: 'b'.repeat(64) }, known_action: true }
     });
-    
-    fireEvent.click(screen.getByText('Log with context'));
-    
-    // Check that context is displayed as JSON
-    expect(screen.getByText(/userId/)).toBeInTheDocument();
-    expect(screen.getByText(/123/)).toBeInTheDocument();
+
+    render(<App />);
+    const user = userEvent.setup();
+    await findLedgerCell();
+    await user.click(screen.getByText('Record'));
+
+    await user.type(screen.getByLabelText(/Action/), 'patch.applied');
+    await user.click(screen.getByText('Append to ledger'));
+
+    await waitFor(() => expect(api.createEvent).toHaveBeenCalled());
+    const body = api.createEvent.mock.calls[0][0];
+    expect(body.action).toBe('patch.applied');
+    expect(body.actor).toEqual({ type: 'user', id: 'lucas@example.com' });
+    expect(await screen.findByText(/#2/)).toBeInTheDocument();
+  });
+
+  it('signs out', async () => {
+    primeLoggedIn(EDITOR);
+    api.logout.mockResolvedValue({ data: { ok: true } });
+    render(<App />);
+    const user = userEvent.setup();
+    await findLedgerCell();
+    await user.click(screen.getByText('Sign out'));
+    expect(await screen.findByText('Sign in')).toBeInTheDocument();
   });
 });

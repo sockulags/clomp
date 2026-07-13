@@ -1,7 +1,7 @@
 {
-  "name": "loggplattform-web-ui",
+  "name": "clomp-web-ui",
   "version": "1.0.0",
-  "description": "Web UI for Loggplattform central logging platform",
+  "description": "Web UI for clomp — tamper-evident audit trail",
   "type": "module",
   "scripts": {
     "dev": "vite",
