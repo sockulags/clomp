@@ -12,6 +12,17 @@ Built for SOC 2 and NIS2 evidence. Self-hosted, open source (MIT), no paywalls.
 Boring on purpose: no dashboards, no AI. Just a ledger that cannot be rewritten,
 and a report that holds up in an audit.
 
+## What it looks like
+
+| Ledger | Scheduled controls |
+|---|---|
+| ![Ledger](docs/screenshots/ledger.png) | ![Scheduled controls](docs/screenshots/schedules.png) |
+
+The PDF the auditor gets: [docs/sample-report.pdf](docs/sample-report.pdf) —
+chain integrity statement, scheduled-controls status, activity summary mapped
+to SOC 2 / NIS2, full event list with hashes. Generate your own demo data with
+`node backend/scripts/seed-demo.js`.
+
 ## How it works
 
 ```mermaid
