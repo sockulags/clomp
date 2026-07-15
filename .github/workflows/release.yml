@@ -51,6 +51,10 @@ jobs:
           push: true
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
+          # Supply-chain attestations: SBOM + SLSA provenance, verifiable with
+          # `docker buildx imagetools inspect <image> --format '{{ json .SBOM }}'`
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -61,6 +65,8 @@ jobs:
           push: true
           tags: ${{ steps.meta-web-ui.outputs.tags }}
           labels: ${{ steps.meta-web-ui.outputs.labels }}
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

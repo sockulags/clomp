@@ -43,6 +43,19 @@ The reason an auditor can trust a clomp export more than a spreadsheet:
 - It cannot know about events that were **never recorded** — that is what
   [scheduled controls](/guide/scheduled-controls) address.
 
+## What it looks like
+
+The ledger — every event chained, the header always showing chain status:
+
+![The clomp ledger](/ledger.png)
+
+Scheduled controls — the declared cadence, and what is overdue:
+
+![Scheduled controls](/schedules.png)
+
+The PDF the auditor gets:
+[sample report](https://github.com/sockulags/clomp/blob/main/docs/sample-report.pdf).
+
 ## The two tracks
 
 | | Track 1: Audit-trail API | Track 2: The security logbook |

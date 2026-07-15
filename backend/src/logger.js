@@ -10,7 +10,9 @@ const logger = pino({
     : undefined,
   base: {
     service: 'clomp-backend',
-    version: process.env.npm_package_version || '1.0.0'
+    // Read from package.json directly: npm_package_version is only set when
+    // launched via npm scripts, not under node/docker/pm2.
+    version: require('../package.json').version
   },
   timestamp: pino.stdTimeFunctions.isoTime
 });

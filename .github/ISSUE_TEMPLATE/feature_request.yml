@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the audit/compliance situation, not just the mechanism.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Recording / SDK / CLI, Scheduled controls, Exports & reports, Verification / anchoring, Auth & roles, Integrations, Deployment / operations, Docs, Other]
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

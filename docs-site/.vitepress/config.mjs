@@ -10,7 +10,14 @@ export default defineConfig({
   ignoreDeadLinks: [/^http:\/\/localhost/],
 
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/clomp/logo.svg' }]
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/clomp/logo.svg' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:title', content: 'clomp — a tamper-evident audit trail for security work' }],
+    ['meta', { property: 'og:description', content: 'Prove — not just claim — that your security activities happen. Append-only, hash-chained, verifiable offline. Built for SOC 2 and NIS2 evidence.' }],
+    ['meta', { property: 'og:image', content: 'https://sockulags.github.io/clomp/og-image.png' }],
+    ['meta', { property: 'og:url', content: 'https://sockulags.github.io/clomp/' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:image', content: 'https://sockulags.github.io/clomp/og-image.png' }]
   ],
 
   themeConfig: {

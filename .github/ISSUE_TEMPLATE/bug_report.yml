@@ -1,0 +1,46 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Record an event with …
+        2. Run clomp verify …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: clomp version
+      placeholder: v0.2.0-alpha / commit sha / image tag
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options: [Backend / API, Web UI, CLI, Node SDK, Docs, Deployment (Docker/compose), Other]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Backend logs, browser console, CLI output. Redact secrets.
+      render: text
+  - type: checkboxes
+    id: integrity
+    attributes:
+      label: Chain integrity
+      options:
+        - label: This issue involves verification failing or the chain reporting broken (if so, please include the `GET /api/verify` response)

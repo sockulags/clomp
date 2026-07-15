@@ -54,13 +54,17 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Higher ceiling for machine event ingestion
+// Higher ceiling for machine event ingestion. Keyed per API key when one is
+// presented (machine fleets often share an egress IP; a leaked key must not
+// be able to flood the chain from many IPs either), per IP otherwise.
+const { ipKeyGenerator } = require('express-rate-limit');
 const eventLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'),
   max: parseInt(process.env.RATE_LIMIT_EVENTS_MAX || '1000'),
-  message: 'Too many event requests from this IP, please try again later.',
+  message: 'Too many event requests, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => (req.apiKey ? `key:${req.apiKey.id}` : ipKeyGenerator(req.ip)),
 });
 
 const healthCheckLimiter = rateLimit({
