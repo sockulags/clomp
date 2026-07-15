@@ -81,6 +81,14 @@ async function appendEvent(tenantId, { occurredAt, actor, action, target, contex
     );
 
     await client.query('COMMIT');
+
+    // Outgoing webhook, after commit and without awaiting: an unreachable
+    // receiver must never fail or slow down recording.
+    const webhooks = require('./eventWebhooks');
+    if (webhooks.isConfigured()) {
+      webhooks.dispatchEvent(event).catch(() => {});
+    }
+
     return event;
   } catch (err) {
     await client.query('ROLLBACK');
