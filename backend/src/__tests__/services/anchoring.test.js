@@ -7,9 +7,15 @@ jest.mock('nodemailer', () => ({
   createTransport: jest.fn(() => ({ sendMail: mockSendMail }))
 }), { virtual: false });
 
+const mockDeliver = jest.fn();
+jest.mock('../../services/webhookDeliveries', () => ({
+  deliver: (...args) => mockDeliver(...args)
+}));
+
 const { isConfigured, anchorCheckpoint, checkpointDigest } = require('../../services/anchoring');
 
 const CHECKPOINT = {
+  id: 'cccccccc-0000-0000-0000-000000000001',
   tenant_id: 'aaaaaaaa-0000-0000-0000-000000000001',
   sequence: 42,
   hash: 'ab'.repeat(32),
@@ -27,7 +33,7 @@ describe('anchoring', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     for (const key of ENV_KEYS) delete process.env[key];
-    global.fetch = jest.fn();
+    mockDeliver.mockResolvedValue('delivered');
   });
 
   test('is not configured by default', () => {
@@ -37,7 +43,7 @@ describe('anchoring', () => {
   test('anchorCheckpoint skips everything when unconfigured', async () => {
     const result = await anchorCheckpoint(CHECKPOINT);
     expect(result).toEqual({ webhook: 'skipped', email: 'skipped' });
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockDeliver).not.toHaveBeenCalled();
     expect(mockSendMail).not.toHaveBeenCalled();
   });
 
@@ -46,37 +52,29 @@ describe('anchoring', () => {
       process.env.ANCHOR_WEBHOOK_URL = 'https://anchors.example/clomp';
     });
 
-    test('POSTs the checkpoint as JSON', async () => {
-      global.fetch.mockResolvedValue({ ok: true, status: 200 });
-
+    test('hands the checkpoint to the durable delivery layer', async () => {
       const result = await anchorCheckpoint(CHECKPOINT);
       expect(result.webhook).toBe('ok');
 
-      const [url, opts] = global.fetch.mock.calls[0];
-      expect(url).toBe('https://anchors.example/clomp');
-      expect(opts.method).toBe('POST');
-      const body = JSON.parse(opts.body);
-      expect(body.type).toBe('checkpoint');
-      expect(body.sequence).toBe(42);
-      expect(body.signature).toBe(CHECKPOINT.signature);
+      expect(mockDeliver).toHaveBeenCalledWith({
+        tenantId: CHECKPOINT.tenant_id,
+        kind: 'anchor',
+        url: 'https://anchors.example/clomp',
+        summary: { checkpoint_id: CHECKPOINT.id, sequence: 42, hash: CHECKPOINT.hash },
+        payload: expect.objectContaining({ type: 'checkpoint', sequence: 42, signature: CHECKPOINT.signature })
+      });
+      // The summary never carries the signature or public key.
+      expect(mockDeliver.mock.calls[0][0].summary.signature).toBeUndefined();
     });
 
-    test('sends a bearer token when configured', async () => {
-      process.env.ANCHOR_WEBHOOK_TOKEN = 'secret-token';
-      global.fetch.mockResolvedValue({ ok: true, status: 200 });
-
-      await anchorCheckpoint(CHECKPOINT);
-      expect(global.fetch.mock.calls[0][1].headers['Authorization']).toBe('Bearer secret-token');
-    });
-
-    test('reports failure on non-2xx without throwing', async () => {
-      global.fetch.mockResolvedValue({ ok: false, status: 500 });
+    test('reports failure when delivery is left pending for retry', async () => {
+      mockDeliver.mockResolvedValue('pending');
       const result = await anchorCheckpoint(CHECKPOINT);
       expect(result.webhook).toBe('failed');
     });
 
-    test('reports failure on network error without throwing', async () => {
-      global.fetch.mockRejectedValue(new Error('ECONNREFUSED'));
+    test('reports failure without throwing when recording the delivery fails', async () => {
+      mockDeliver.mockRejectedValue(new Error('insert failed'));
       const result = await anchorCheckpoint(CHECKPOINT);
       expect(result.webhook).toBe('failed');
     });

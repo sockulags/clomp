@@ -2,6 +2,11 @@ jest.mock('../../logger', () => ({
   info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(), fatal: jest.fn()
 }));
 
+const mockDeliver = jest.fn();
+jest.mock('../../services/webhookDeliveries', () => ({
+  deliver: (...args) => mockDeliver(...args)
+}));
+
 const { isConfigured, dispatchEvent } = require('../../services/eventWebhooks');
 
 const EVENT = {
@@ -17,13 +22,13 @@ describe('event webhooks', () => {
     delete process.env.EVENT_WEBHOOK_URL;
     delete process.env.EVENT_WEBHOOK_TOKEN;
     delete process.env.EVENT_WEBHOOK_ACTIONS;
-    global.fetch = jest.fn();
+    mockDeliver.mockResolvedValue('delivered');
   });
 
   test('off by default', async () => {
     expect(isConfigured()).toBe(false);
     expect(await dispatchEvent(EVENT)).toBe('skipped');
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockDeliver).not.toHaveBeenCalled();
   });
 
   describe('configured', () => {
@@ -31,39 +36,38 @@ describe('event webhooks', () => {
       process.env.EVENT_WEBHOOK_URL = 'https://hooks.example.com/clomp';
     });
 
-    test('POSTs the event as JSON', async () => {
-      global.fetch.mockResolvedValue({ ok: true, status: 200 });
+    test('hands the event to the durable delivery layer', async () => {
       expect(await dispatchEvent(EVENT)).toBe('ok');
 
-      const [url, opts] = global.fetch.mock.calls[0];
-      expect(url).toBe('https://hooks.example.com/clomp');
-      const body = JSON.parse(opts.body);
-      expect(body.type).toBe('event');
-      expect(body.sequence).toBe(7);
-      expect(body.action).toBe('incident.opened');
-    });
-
-    test('sends a bearer token when configured', async () => {
-      process.env.EVENT_WEBHOOK_TOKEN = 'hook-secret';
-      global.fetch.mockResolvedValue({ ok: true, status: 200 });
-      await dispatchEvent(EVENT);
-      expect(global.fetch.mock.calls[0][1].headers['Authorization']).toBe('Bearer hook-secret');
+      expect(mockDeliver).toHaveBeenCalledWith({
+        tenantId: 't1',
+        kind: 'event',
+        url: 'https://hooks.example.com/clomp',
+        summary: { event_id: 'e1', sequence: 7, action: 'incident.opened' },
+        payload: expect.objectContaining({ type: 'event', sequence: 7, action: 'incident.opened' })
+      });
+      // The summary never carries actor/context — only identifiers.
+      expect(mockDeliver.mock.calls[0][0].summary.actor).toBeUndefined();
     });
 
     test('action prefix filter includes and excludes', async () => {
       process.env.EVENT_WEBHOOK_ACTIONS = 'incident., retention.';
-      global.fetch.mockResolvedValue({ ok: true, status: 200 });
 
       expect(await dispatchEvent(EVENT)).toBe('ok');
       expect(await dispatchEvent({ ...EVENT, action: 'patch.applied' })).toBe('skipped');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(mockDeliver).toHaveBeenCalledTimes(1);
+    });
+
+    test('a first attempt left pending for retry reports failed to the caller', async () => {
+      mockDeliver.mockResolvedValue('pending');
+      expect(await dispatchEvent(EVENT)).toBe('failed');
     });
 
     test('failures are reported, never thrown', async () => {
-      global.fetch.mockResolvedValue({ ok: false, status: 500 });
+      mockDeliver.mockResolvedValue('failed');
       expect(await dispatchEvent(EVENT)).toBe('failed');
 
-      global.fetch.mockRejectedValue(new Error('ECONNREFUSED'));
+      mockDeliver.mockRejectedValue(new Error('insert failed'));
       expect(await dispatchEvent(EVENT)).toBe('failed');
     });
   });

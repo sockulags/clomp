@@ -18,7 +18,9 @@ becomes detectable: the archived checkpoint will not match a later export.
 ## Configuration
 
 Anchoring is opt-in and best-effort — a delivery failure is logged loudly
-but never blocks the checkpoint job. Configure either or both channels:
+but never blocks the checkpoint job. Webhook anchors are additionally
+recorded in the [webhook delivery log](/operations/integrations#delivery-log-retries)
+and retried with exponential backoff. Configure either or both channels:
 
 ```bash
 # Webhook: each checkpoint is POSTed as JSON

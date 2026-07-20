@@ -113,6 +113,26 @@ components:
             sequence: { type: integer }
             signed_at: { type: string, format: date-time }
             signature_valid: { type: boolean }
+    WebhookDelivery:
+      type: object
+      description: >-
+        One outgoing webhook delivery (event webhook or checkpoint anchor).
+        Stores a payload summary only — never the full payload or bearer token.
+      properties:
+        id: { type: integer, description: Serial id; keyset-paginate with before_id }
+        kind: { type: string, enum: [event, anchor] }
+        url: { type: string, description: Target URL at the time of enqueue }
+        payload_summary:
+          type: object
+          additionalProperties: true
+          description: 'event: { event_id, sequence, action }; anchor: { checkpoint_id, sequence, hash }'
+        status: { type: string, enum: [pending, delivered, failed] }
+        attempt_count: { type: integer }
+        last_error: { type: string, nullable: true }
+        next_attempt_at: { type: string, format: date-time, nullable: true }
+        delivered_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     Error:
       type: object
       properties:
@@ -499,6 +519,48 @@ paths:
       responses:
         '200': { description: Revoked }
         '404': { description: Key not found or already revoked }
+
+  /api/webhook-deliveries:
+    get:
+      tags: [admin]
+      summary: Outgoing webhook delivery log (admin) — troubleshooting for retries
+      description: >-
+        Every outgoing webhook POST (event webhooks and checkpoint anchoring)
+        is recorded and retried with exponential backoff. Newest first,
+        keyset-paginated on the serial id.
+      security: [{ session: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, delivered, failed] }
+        - name: kind
+          in: query
+          schema: { type: string, enum: [event, anchor] }
+        - name: before_id
+          in: query
+          description: Return deliveries with id below this (keyset pagination)
+          schema: { type: integer }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+      responses:
+        '200':
+          description: Delivery log page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveries:
+                    type: array
+                    items: { $ref: '#/components/schemas/WebhookDelivery' }
+                  has_more: { type: boolean }
+                  next_before_id: { type: integer, nullable: true }
+        '400':
+          description: Invalid filter or cursor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /health:
     get:

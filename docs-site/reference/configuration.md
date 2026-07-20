@@ -46,9 +46,13 @@ All configuration is environment variables. With Docker Compose, set them in
 | `NOTIFY_EMAIL_TO` | *(unset)* | Enables a daily email digest of overdue scheduled controls (uses the SMTP settings above) |
 | `NOTIFY_SCHEDULE` | `0 6 * * *` | Cron (UTC) for the digest |
 | `NOTIFY_INCLUDE_DUE` | `false` | Also include controls that are due but within grace |
-| `EVENT_WEBHOOK_URL` | *(unset)* | POST every appended event as JSON (fire-and-forget) |
+| `EVENT_WEBHOOK_URL` | *(unset)* | POST every appended event as JSON (asynchronous, retried) |
 | `EVENT_WEBHOOK_TOKEN` | *(unset)* | Optional `Authorization: Bearer` value |
 | `EVENT_WEBHOOK_ACTIONS` | *(all)* | Comma-separated action prefixes to forward, e.g. `incident.,retention.` |
+| `WEBHOOK_RETRY_MAX_ATTEMPTS` | `5` | Delivery attempts per webhook (event + anchor); `1` disables retries |
+| `WEBHOOK_RETRY_BASE_MS` | `60000` | Delay before the first retry; doubles per attempt (~15 min total by default) |
+| `WEBHOOK_SWEEP_INTERVAL_MS` | `30000` | How often pending deliveries are re-checked |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | `30` | Prune delivered/failed rows from the delivery log after this |
 
 ## Reports
 

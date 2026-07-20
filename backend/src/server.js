@@ -21,7 +21,9 @@ const evidenceRoutes = require('./routes/evidence');
 const exportRoutes = require('./routes/export');
 const scheduleRoutes = require('./routes/schedules');
 const tenantRoutes = require('./routes/tenants');
+const webhookDeliveryRoutes = require('./routes/webhookDeliveries');
 const { startScheduler } = require('./services/scheduler');
+const { startDeliveryWorker } = require('./services/webhookDeliveries');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -162,6 +164,7 @@ app.use('/api/evidence', evidenceRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/tenants', tenantRoutes);
+app.use('/api/webhook-deliveries', webhookDeliveryRoutes);
 
 // Serve web UI for all other routes (if built)
 // Express 5 (path-to-regexp v8) no longer accepts a bare '*' path,
@@ -176,6 +179,8 @@ if (require('fs').existsSync(webUiIndexPath)) {
 // Initialize database and start server
 initDatabase().then(() => {
   startScheduler();
+  // Retry sweeper for outgoing webhooks; no-op when no webhook is configured.
+  startDeliveryWorker();
 
   app.listen(PORT, () => {
     logger.info({ port: PORT }, 'clomp backend started');

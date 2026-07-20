@@ -128,6 +128,28 @@ CREATE TABLE IF NOT EXISTS schedules (
   UNIQUE (tenant_id, action)
 );
 
+-- Outgoing webhook delivery log: one row per attempted delivery (event
+-- webhooks and checkpoint anchoring). Only a payload summary is stored —
+-- the full body is rebuilt from the events/checkpoints tables on retry.
+-- Pending rows survive restarts; the in-process sweeper picks them up.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(id),
+  kind TEXT NOT NULL CHECK (kind IN ('event', 'anchor')),
+  url TEXT NOT NULL,
+  payload_summary JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_attempt_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due ON webhook_deliveries(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_tenant ON webhook_deliveries(tenant_id, id);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_created ON webhook_deliveries(created_at);
+
 CREATE TABLE IF NOT EXISTS evidence_files (
   sha256 TEXT PRIMARY KEY,
   filename TEXT NOT NULL,

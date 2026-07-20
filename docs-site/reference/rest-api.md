@@ -165,6 +165,7 @@ return **501**.
 | `POST /api/keys` | admin | `{ name, expires_at? }`; the full key is returned exactly once |
 | `POST /api/keys/:id/rotate` | admin | `{ expires_at? }`; atomically revokes the key and creates a replacement with the same name — the new secret is returned exactly once |
 | `DELETE /api/keys/:id` | admin | Revoke |
+| `GET /api/webhook-deliveries` | admin | Outgoing webhook delivery log; filters `status`, `kind`, keyset-paginated via `before_id` |
 
 API key lifecycle notes:
 

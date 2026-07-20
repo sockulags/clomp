@@ -10,10 +10,9 @@ const logger = require('../logger');
  * detectable — the archived checkpoint will not match a later export.
  *
  * Anchoring is best-effort: a delivery failure is logged loudly but never
- * fails the checkpoint job itself.
+ * fails the checkpoint job itself. Webhook anchors are additionally recorded
+ * in webhook_deliveries and retried with backoff (see webhookDeliveries.js).
  */
-
-const WEBHOOK_TIMEOUT_MS = 10_000;
 
 function webhookConfig() {
   const url = process.env.ANCHOR_WEBHOOK_URL;
@@ -60,17 +59,18 @@ function checkpointDigest(checkpoint) {
 }
 
 async function anchorToWebhook(checkpoint, config) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (config.token) headers['Authorization'] = `Bearer ${config.token}`;
-
-  const res = await fetch(config.url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ type: 'checkpoint', ...checkpoint }),
-    signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS)
+  // Route through the durable delivery log: a failed anchor is retried with
+  // backoff by the delivery worker instead of being silently dropped.
+  const deliveries = require('./webhookDeliveries');
+  const status = await deliveries.deliver({
+    tenantId: checkpoint.tenant_id,
+    kind: 'anchor',
+    url: config.url,
+    summary: { checkpoint_id: checkpoint.id, sequence: checkpoint.sequence, hash: checkpoint.hash },
+    payload: { type: 'checkpoint', ...checkpoint }
   });
-  if (!res.ok) {
-    throw new Error(`Webhook responded ${res.status}`);
+  if (status !== 'delivered') {
+    throw new Error('checkpoint webhook delivery failed (recorded for retry)');
   }
 }
 
