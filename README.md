@@ -7,6 +7,7 @@
 
 **Documentation: [sockulags.github.io/clomp](https://sockulags.github.io/clomp/)** —
 guide, operations handbook, REST/CLI/SDK reference, hash-chain spec and threat model.
+Where it's headed: [ROADMAP.md](ROADMAP.md).
 
 **A tamper-evident audit trail for security work.** clomp lets an organization
 *prove* — not just claim — that its security activities happen: access reviews,

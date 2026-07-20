@@ -28,7 +28,7 @@ export default defineConfig({
       { text: 'Operations', link: '/operations/deployment', activeMatch: '/operations/' },
       { text: 'Reference', link: '/reference/rest-api', activeMatch: '/reference/' },
       {
-        text: 'v0.1.0-alpha',
+        text: 'v0.2.0-alpha',
         items: [
           { text: 'Releases', link: 'https://github.com/sockulags/clomp/releases' },
           { text: 'Changelog', link: 'https://github.com/sockulags/clomp/commits/main' }
@@ -42,6 +42,7 @@ export default defineConfig({
           text: 'Introduction',
           items: [
             { text: 'What is clomp?', link: '/guide/what-is-clomp' },
+            { text: 'How clomp compares', link: '/guide/comparison' },
             { text: 'Getting started', link: '/guide/getting-started' }
           ]
         },
@@ -65,6 +66,7 @@ export default defineConfig({
             { text: 'External anchoring', link: '/operations/anchoring' },
             { text: 'Integrations', link: '/operations/integrations' },
             { text: 'Retention', link: '/operations/retention' },
+            { text: 'GDPR & personal data', link: '/operations/gdpr' },
             { text: 'Backup & restore', link: '/operations/backup' }
           ]
         }
