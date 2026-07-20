@@ -11,7 +11,8 @@ and an initial assessment within 7 days.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | ✔         |
+| 0.2.x   | ✔         |
+| < 0.2   | ✘         |
 
 ## Threat model
 
