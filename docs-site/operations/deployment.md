@@ -47,6 +47,33 @@ network, and the host mapping exists solely for local inspection.
 All configuration is environment variables — see the
 [configuration reference](/reference/configuration).
 
+## Horizontal scaling
+
+A single instance is the common case and needs none of this. If you do run
+several backend replicas against the same PostgreSQL database (for
+availability or rolling deploys), here is what to expect:
+
+- **Scheduled jobs are single-runner.** Every replica starts the cron
+  scheduler, but each run of a scheduled job (checkpoint signing — including
+  external anchoring — and overdue-control notifications) first takes a
+  PostgreSQL advisory lock (`pg_try_advisory_lock`). Replicas that do not win
+  the lock skip that run, so a schedule tick produces exactly one checkpoint
+  per tenant and one notification digest, no matter how many replicas are
+  running. No configuration is required. One caveat: these are session-level
+  locks, so the backend must talk to PostgreSQL directly or through a pooler
+  in *session* mode — a transaction-mode pooler (e.g. PgBouncer in
+  `pool_mode = transaction`) breaks session advisory locks and voids the
+  single-runner guarantee.
+- **Event appends are already safe.** Each append runs in a transaction
+  holding a per-tenant advisory lock, so concurrent writes through any number
+  of replicas produce a gap-free, fork-free chain.
+- **Rate limiting is per process.** The `express-rate-limit` counters live in
+  each replica's memory, so N replicas behind a load balancer collectively
+  allow up to N × `RATE_LIMIT_MAX` requests per window per client (and
+  likewise for the other `RATE_LIMIT_*` ceilings). Compensate at the load
+  balancer — e.g. nginx `limit_req` or HAProxy stick tables — or divide the
+  `RATE_LIMIT_*` values by the replica count.
+
 ## Sizing
 
 Audit volumes are small. Events are single-row inserts with a per-tenant
