@@ -12,10 +12,13 @@ jest.mock('../../logger', () => ({
 // In-memory user/session store answering the queries auth.js + session.js issue.
 let store;
 
+// Tenants default to active; a test can deactivate one via store.inactiveTenants.
+const tenantActive = (tenantId) => !(store.inactiveTenants || []).includes(tenantId);
+
 const mockPool = {
   query: jest.fn(async (sql, params) => {
-    if (sql.includes('FROM users WHERE email')) {
-      return { rows: store.users.filter(u => u.email === params[0]) };
+    if (sql.includes('FROM users u JOIN tenants t')) {
+      return { rows: store.users.filter(u => u.email === params[0] && tenantActive(u.tenant_id)) };
     }
     if (sql.includes('INSERT INTO sessions')) {
       store.sessions.push({
@@ -39,10 +42,10 @@ const mockPool = {
       store.sessions = store.sessions.filter(s => s.token_hash !== params[0]);
       return { rows: [] };
     }
-    if (sql.includes('FROM sessions s JOIN users u')) {
+    if (sql.includes('FROM sessions s')) {
       const session = store.sessions.find(s => s.token_hash === params[0]);
       if (!session) return { rows: [] };
-      const user = store.users.find(u => u.id === session.user_id && !u.disabled);
+      const user = store.users.find(u => u.id === session.user_id && !u.disabled && tenantActive(u.tenant_id));
       return { rows: user ? [{ id: user.id, tenant_id: user.tenant_id, email: user.email, name: user.name, role: user.role }] : [] };
     }
     if (sql.includes('SELECT totp_secret FROM users')) {
@@ -161,6 +164,20 @@ describe('auth routes', () => {
       .send({ email: 'nobody@example.com', password: 'correct-horse' })).status).toBe(401);
 
     store.users[0].disabled = true;
+    expect((await request(app).post('/api/auth/login')
+      .send({ email: 'lucas@example.com', password: 'correct-horse' })).status).toBe(401);
+  });
+
+  test('a soft-deactivated tenant blocks both login and existing sessions', async () => {
+    // Sign in while the tenant is still active.
+    const login = await request(app).post('/api/auth/login')
+      .send({ email: 'lucas@example.com', password: 'correct-horse' });
+    const cookie = login.headers['set-cookie'][0].split(';')[0];
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).status).toBe(200);
+
+    // Deactivate the tenant: the session stops resolving and login is refused.
+    store.inactiveTenants = [TENANT];
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).status).toBe(401);
     expect((await request(app).post('/api/auth/login')
       .send({ email: 'lucas@example.com', password: 'correct-horse' })).status).toBe(401);
   });

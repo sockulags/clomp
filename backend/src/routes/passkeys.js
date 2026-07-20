@@ -202,10 +202,14 @@ router.post('/login/options', requireWebAuthn, async (req, res) => {
     let userId = null;
 
     if (email) {
+      // Like password login, a soft-deactivated tenant's accounts do not
+      // resolve (and their credentials are not enumerated).
       const { rows } = await getPool().query(
         `SELECT p.credential_id, p.transports, u.id AS user_id
-         FROM passkeys p JOIN users u ON u.id = p.user_id
-         WHERE u.email = $1 AND u.disabled = false`,
+         FROM passkeys p
+         JOIN users u ON u.id = p.user_id
+         JOIN tenants t ON t.id = u.tenant_id
+         WHERE u.email = $1 AND u.disabled = false AND t.active = true`,
         [email]
       );
       allowCredentials = rows.map(r => ({
@@ -239,11 +243,15 @@ router.post('/login/verify', requireWebAuthn, async (req, res) => {
       return res.status(400).json({ error: 'Unknown or expired challenge — start again' });
     }
 
+    // The tenants join keeps passkey login consistent with password login:
+    // a soft-deactivated tenant's passkeys are unknown, no session is minted.
     const { rows } = await getPool().query(
       `SELECT p.id, p.user_id, p.credential_id, p.public_key, p.counter, p.transports,
               u.email, u.name, u.role, u.disabled
-       FROM passkeys p JOIN users u ON u.id = p.user_id
-       WHERE p.credential_id = $1`,
+       FROM passkeys p
+       JOIN users u ON u.id = p.user_id
+       JOIN tenants t ON t.id = u.tenant_id
+       WHERE p.credential_id = $1 AND t.active = true`,
       [String(response?.id || '')]
     );
     const passkey = rows[0];

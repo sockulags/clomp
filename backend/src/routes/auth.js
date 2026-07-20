@@ -40,8 +40,12 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    // Users of a soft-deactivated tenant cannot sign in; with every tenant
+    // active (single-tenant installs) this matches the pre-multi-tenant query.
     const { rows } = await getPool().query(
-      'SELECT id, email, name, role, password_hash, totp_secret, totp_enabled, disabled FROM users WHERE email = $1',
+      `SELECT u.id, u.email, u.name, u.role, u.password_hash, u.totp_secret, u.totp_enabled, u.disabled
+       FROM users u JOIN tenants t ON t.id = u.tenant_id
+       WHERE u.email = $1 AND t.active = true`,
       [String(email).toLowerCase()]
     );
     const user = rows[0];

@@ -6,12 +6,22 @@ const DATABASE_URL = process.env.DATABASE_URL;
 let pool = null;
 let defaultTenantId = null;
 
+// Tenant slugs are DNS-label-like: lowercase alphanumerics and hyphens, no
+// leading or trailing hyphen, at most 63 characters. Shared by the tenants
+// API and the create-admin script so the grammar cannot drift.
+const TENANT_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tenants (
   id UUID PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Multi-tenant first slice: a human-readable label next to the slug-like
+-- name, and a soft-deactivation flag (the chain is append-only, so tenants
+-- are never hard-deleted).
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
 
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY,
@@ -206,5 +216,6 @@ module.exports = {
   initDatabase,
   getPool,
   getDefaultTenantId,
-  closeDatabase
+  closeDatabase,
+  TENANT_SLUG_PATTERN
 };

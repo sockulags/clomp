@@ -131,6 +131,31 @@ describe('chain service', () => {
     expect(result).toEqual({ intact: true, verified: 5 });
   });
 
+  test('tenant chains are fully independent: own sequences, own genesis, isolated tampering', async () => {
+    const TENANT_B = 'bbbbbbbb-0000-0000-0000-000000000002';
+
+    const a1 = await appendEvent(TENANT, { actor: { type: 'user', id: 'a' }, action: 'patch.applied' });
+    const b1 = await appendEvent(TENANT_B, { actor: { type: 'user', id: 'b' }, action: 'backup.tested' });
+    const a2 = await appendEvent(TENANT, { actor: { type: 'user', id: 'a' }, action: 'patch.applied' });
+
+    // Each tenant starts its own chain at sequence 1 from the genesis hash;
+    // interleaved writes never leak across.
+    expect(a1.sequence).toBe(1);
+    expect(b1.sequence).toBe(1);
+    expect(a2.sequence).toBe(2);
+    expect(b1.prev_hash).toBe(GENESIS_HASH);
+    expect(a2.prev_hash).toBe(a1.hash);
+
+    // Verification is per tenant and only counts that tenant's events.
+    expect(await verifyChain(TENANT)).toEqual({ intact: true, verified: 2 });
+    expect(await verifyChain(TENANT_B)).toEqual({ intact: true, verified: 1 });
+
+    // Tampering with tenant B's chain must not affect tenant A's verdict.
+    store.events.find(e => e.tenant_id === TENANT_B).action = 'forged.entry';
+    expect((await verifyChain(TENANT_B)).intact).toBe(false);
+    expect((await verifyChain(TENANT)).intact).toBe(true);
+  });
+
   test('verifyChain detects a tampered payload', async () => {
     for (let i = 0; i < 3; i++) {
       await appendEvent(TENANT, { actor: { type: 'user', id: 'u1' }, action: 'training.completed' });

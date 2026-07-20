@@ -68,6 +68,7 @@ export default defineConfig({
             { text: 'Monitoring', link: '/operations/monitoring' },
             { text: 'Retention', link: '/operations/retention' },
             { text: 'GDPR & personal data', link: '/operations/gdpr' },
+            { text: 'Multi-tenant mode', link: '/operations/multi-tenant' },
             { text: 'Backup & restore', link: '/operations/backup' }
           ]
         }

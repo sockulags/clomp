@@ -28,10 +28,14 @@ async function attachSession(req, res, next) {
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (!token) return next();
 
+    // Sessions of a soft-deactivated tenant stop resolving; with every tenant
+    // active (single-tenant installs) this matches the pre-multi-tenant query.
     const { rows } = await getPool().query(
       `SELECT u.id, u.tenant_id, u.email, u.name, u.role
-       FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = $1 AND s.expires_at > now() AND u.disabled = false`,
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       JOIN tenants t ON t.id = u.tenant_id
+       WHERE s.token_hash = $1 AND s.expires_at > now() AND u.disabled = false AND t.active = true`,
       [hashToken(token)]
     );
     if (rows.length) {

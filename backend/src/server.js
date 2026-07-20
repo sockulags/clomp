@@ -20,6 +20,7 @@ const verifyRoutes = require('./routes/verify');
 const evidenceRoutes = require('./routes/evidence');
 const exportRoutes = require('./routes/export');
 const scheduleRoutes = require('./routes/schedules');
+const tenantRoutes = require('./routes/tenants');
 const { startScheduler } = require('./services/scheduler');
 
 const app = express();
@@ -160,6 +161,7 @@ app.use('/api/verify', verifyRoutes);
 app.use('/api/evidence', evidenceRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/schedules', scheduleRoutes);
+app.use('/api/tenants', tenantRoutes);
 
 // Serve web UI for all other routes (if built)
 // Express 5 (path-to-regexp v8) no longer accepts a bare '*' path,

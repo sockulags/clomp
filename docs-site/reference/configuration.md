@@ -80,4 +80,10 @@ All configuration is environment variables. With Docker Compose, set them in
 | `RATE_LIMIT_LOGIN_MAX` | `10` | Login attempts per window |
 | `RATE_LIMIT_HEALTH_MAX` | `60` | Health checks per window |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` / `fatal` |
-| `TENANT_NAME` | `default` | Name of the installation's tenant (multi-tenant schema, single-tenant operation) |
+
+## Multi-tenant mode
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTI_TENANT` | `false` | Enables the admin-only `/api/tenants` endpoints for serving several client organizations from one installation — see [Multi-tenant mode](/operations/multi-tenant) |
+| `TENANT_NAME` | `default` | Slug of the tenant created at first start (single-tenant installs never need to change this) |

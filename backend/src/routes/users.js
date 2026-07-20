@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const argon2 = require('argon2');
-const { getPool, getDefaultTenantId } = require('../database');
+const { getPool } = require('../database');
 const { requireRole } = require('../middleware/session');
 const logger = require('../logger');
 
@@ -36,10 +36,12 @@ router.post('/', async (req, res) => {
 
     const initialPassword = crypto.randomBytes(12).toString('base64url');
     const id = crypto.randomUUID();
+    // New users join the acting admin's tenant (identical to the default
+    // tenant on single-tenant installs) — never any other.
     await getPool().query(
       `INSERT INTO users (id, tenant_id, email, name, password_hash, role)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [id, getDefaultTenantId(), String(email).toLowerCase(), name, await argon2.hash(initialPassword), role]
+      [id, req.user.tenant_id, String(email).toLowerCase(), name, await argon2.hash(initialPassword), role]
     );
     res.status(201).json({ id, email: String(email).toLowerCase(), name, role, initial_password: initialPassword });
   } catch (error) {

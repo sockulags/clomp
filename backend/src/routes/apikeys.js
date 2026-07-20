@@ -56,6 +56,8 @@ router.post('/', async (req, res) => {
 
     const key = generateApiKey();
     const id = crypto.randomUUID();
+    // The key is created in the acting admin's tenant (identical to the
+    // default tenant on single-tenant installs) — never in any other.
     await getPool().query(
       'INSERT INTO api_keys (id, tenant_id, name, key_hash, prefix, expires_at) VALUES ($1, $2, $3, $4, $5, $6)',
       [id, req.user.tenant_id, name, hashKey(key), key.slice(0, 16), expiry.value]

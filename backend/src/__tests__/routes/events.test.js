@@ -194,6 +194,29 @@ describe('event routes', () => {
       expect(mockPoolQuery).not.toHaveBeenCalled();
     });
 
+    test('scopes reads and writes to the caller\'s own tenant — a tenant-B key never sees tenant A', async () => {
+      const TENANT_B = 'bbbbbbbb-0000-0000-0000-000000000002';
+      const tenantBKey = appAs({ apiKey: { id: 'k2', name: 'other-org-bot', tenant_id: TENANT_B } });
+
+      // Reads: the SQL is always filtered by the principal's tenant_id, and
+      // there is no request parameter that can select another tenant.
+      mockPoolQuery.mockResolvedValue({ rows: [] });
+      await request(tenantBKey).get('/api/events?tenant_id=' + TENANT);
+      const [sql, params] = mockPoolQuery.mock.calls[0];
+      expect(sql).toContain('tenant_id = $1');
+      expect(params[0]).toBe(TENANT_B);
+      expect(params).not.toContain(TENANT);
+
+      // Writes: events are appended to the key's own chain.
+      await request(tenantBKey).post('/api/events').send(VALID_BODY);
+      expect(mockAppendEvent).toHaveBeenCalledWith(TENANT_B, expect.anything());
+
+      // Single-event fetch is tenant-scoped too.
+      await request(tenantBKey).get('/api/events/1');
+      const singleCall = mockPoolQuery.mock.calls[mockPoolQuery.mock.calls.length - 1];
+      expect(singleCall[1][0]).toBe(TENANT_B);
+    });
+
     test('serves the action catalog', async () => {
       const res = await request(auditorApp()).get('/api/events/catalog');
       expect(res.status).toBe(200);

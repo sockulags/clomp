@@ -58,6 +58,15 @@ describe('user routes', () => {
     expect(storedHash).toMatch(/^\$argon2id\$/);
   });
 
+  test('creates the user in the acting admin\'s tenant, never the default tenant', async () => {
+    const TENANT_B = 'bbbbbbbb-0000-0000-0000-000000000002';
+    const otherAdmin = { id: 'admin-2', email: 'b@acme.example', role: 'admin', tenant_id: TENANT_B };
+    const res = await request(appAs(otherAdmin)).post('/api/users')
+      .send({ email: 'colleague@acme.example', name: 'Colleague', role: 'editor' });
+    expect(res.status).toBe(201);
+    expect(mockPoolQuery.mock.calls[0][1][1]).toBe(TENANT_B);
+  });
+
   test('rejects invalid roles and duplicate emails', async () => {
     expect((await request(appAs(admin)).post('/api/users')
       .send({ email: 'x@x.se', name: 'X', role: 'superuser' })).status).toBe(400);

@@ -58,12 +58,12 @@ const mockPool = {
       store.passkeys = store.passkeys.filter(p => !(p.id === params[0] && p.user_id === params[1]));
       return { rowCount: before - store.passkeys.length, rows: [] };
     }
-    if (sql.includes('FROM passkeys p JOIN users u') && sql.includes('u.email = $1')) {
+    if (sql.includes('FROM passkeys p') && sql.includes('u.email = $1')) {
       const user = store.users.find(u => u.email === params[0] && !u.disabled);
       if (!user) return { rows: [] };
       return { rows: store.passkeys.filter(p => p.user_id === user.id).map(p => ({ ...p, user_id: user.id })) };
     }
-    if (sql.includes('FROM passkeys p JOIN users u') && sql.includes('p.credential_id = $1')) {
+    if (sql.includes('FROM passkeys p') && sql.includes('p.credential_id = $1')) {
       const pk = store.passkeys.find(p => p.credential_id === params[0]);
       if (!pk) return { rows: [] };
       const user = store.users.find(u => u.id === pk.user_id);

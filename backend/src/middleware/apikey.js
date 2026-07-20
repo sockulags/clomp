@@ -27,10 +27,14 @@ async function attachApiKey(req, res, next) {
     const key = req.headers['x-api-key'];
     if (!key || typeof key !== 'string') return next();
 
+    // Keys of a soft-deactivated tenant stop resolving; with every tenant
+    // active (single-tenant installs) this matches the pre-multi-tenant query.
     const { rows } = await getPool().query(
-      `SELECT id, tenant_id, name, last_used_at FROM api_keys
-       WHERE key_hash = $1 AND revoked_at IS NULL
-         AND (expires_at IS NULL OR expires_at > now())`,
+      `SELECT k.id, k.tenant_id, k.name, k.last_used_at
+       FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
+       WHERE k.key_hash = $1 AND k.revoked_at IS NULL
+         AND (k.expires_at IS NULL OR k.expires_at > now())
+         AND t.active = true`,
       [hashKey(key)]
     );
     if (rows.length) {
