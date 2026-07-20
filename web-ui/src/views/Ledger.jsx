@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api';
 
 function EventRow({ event }) {
@@ -48,18 +48,32 @@ function EventRow({ event }) {
 function Ledger() {
   const [events, setEvents] = useState([]);
   const [catalog, setCatalog] = useState([]);
-  const [filters, setFilters] = useState({ action: '', actor_id: '', from: '', to: '' });
+  const [filters, setFilters] = useState({ q: '', action: '', actor_id: '', from: '', to: '' });
+  const [search, setSearch] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [nextBefore, setNextBefore] = useState(null);
   const [error, setError] = useState(null);
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     api.catalog().then(res => setCatalog(res.data.actions)).catch(() => {});
   }, []);
 
+  // Debounce the search box into the filters so we don't query on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters(prev => (prev.q === search ? prev : { ...prev, q: search }));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const load = useCallback(async (before = null, append = false) => {
+    // Overlapping loads (typing while a slow request is in flight) may resolve
+    // out of order; only the latest request is allowed to update the list.
+    const reqId = ++requestSeq.current;
     try {
       const params = { limit: 50 };
+      if (filters.q) params.q = filters.q;
       if (filters.action) params.action = filters.action;
       if (filters.actor_id) params.actor_id = filters.actor_id;
       if (filters.from) params.from = new Date(filters.from).toISOString();
@@ -67,11 +81,18 @@ function Ledger() {
       if (before) params.before_sequence = before;
 
       const res = await api.events(params);
+      if (reqId !== requestSeq.current) return;
       setEvents(prev => append ? [...prev, ...res.data.events] : res.data.events);
       setHasMore(res.data.has_more);
       setNextBefore(res.data.next_before_sequence);
       setError(null);
     } catch (err) {
+      if (reqId !== requestSeq.current) return;
+      if (!append) {
+        // A failed reload must not leave a stale keyset cursor behind.
+        setHasMore(false);
+        setNextBefore(null);
+      }
       setError(err.response?.data?.error || 'Failed to load events');
     }
   }, [filters]);
@@ -83,6 +104,13 @@ function Ledger() {
   return (
     <section>
       <div className="filter-bar">
+        <input
+          type="search"
+          className="search-box"
+          placeholder="search events…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
         <select value={filters.action} onChange={e => setFilter('action', e.target.value)}>
           <option value="">all actions</option>
           {catalog.map(a => <option key={a.action} value={a.action}>{a.action}</option>)}

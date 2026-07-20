@@ -141,6 +141,22 @@ describe('App', () => {
     expect(screen.getByText('Admin')).toBeInTheDocument();
   });
 
+  it('sends debounced free-text search to the events API', async () => {
+    primeLoggedIn(EDITOR);
+    render(<App />);
+    const user = userEvent.setup();
+    await findLedgerCell();
+
+    // The initial load must not carry a q parameter.
+    expect(api.events.mock.calls[0][0]).not.toHaveProperty('q');
+
+    await user.type(screen.getByPlaceholderText(/search events/), 'web-01');
+    await waitFor(() => {
+      const lastCall = api.events.mock.calls.at(-1)[0];
+      expect(lastCall).toMatchObject({ q: 'web-01' });
+    });
+  });
+
   it('expands an event row to show hashes', async () => {
     primeLoggedIn(EDITOR);
     render(<App />);

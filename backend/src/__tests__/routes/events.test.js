@@ -152,6 +152,48 @@ describe('event routes', () => {
       expect(params[1]).toBe('patch.applied');
     });
 
+    test('applies q as one ILIKE condition across all searchable fields', async () => {
+      mockPoolQuery.mockResolvedValue({ rows: [row(1)] });
+      const res = await request(auditorApp()).get('/api/events').query({ q: 'web-01' });
+      expect(res.status).toBe(200);
+      const [sql, params] = mockPoolQuery.mock.calls[0];
+      expect(sql).toContain('action ILIKE $2');
+      expect(sql).toContain("actor->>'id' ILIKE $2");
+      expect(sql).toContain("actor->>'type' ILIKE $2");
+      expect(sql).toContain("target->>'id' ILIKE $2");
+      expect(sql).toContain("target->>'type' ILIKE $2");
+      expect(sql).toContain('context::text ILIKE $2');
+      expect(params).toEqual([TENANT, '%web-01%', 51]);
+    });
+
+    test('composes q with filters and keyset pagination', async () => {
+      mockPoolQuery.mockResolvedValue({ rows: [] });
+      await request(auditorApp())
+        .get('/api/events')
+        .query({ q: 'deploy', action: 'patch.applied', actor_id: 'lucas', before_sequence: 42 });
+      const [sql, params] = mockPoolQuery.mock.calls[0];
+      expect(sql).toContain('action ILIKE $2');
+      expect(sql).toContain('action = $3');
+      expect(sql).toContain("actor->>'id' = $4");
+      expect(sql).toContain('sequence < $5');
+      expect(params).toEqual([TENANT, '%deploy%', 'patch.applied', 'lucas', 42, 51]);
+    });
+
+    test('escapes LIKE wildcards in q so they match literally', async () => {
+      mockPoolQuery.mockResolvedValue({ rows: [] });
+      await request(auditorApp()).get('/api/events').query({ q: '50%_\\done' });
+      const [, params] = mockPoolQuery.mock.calls[0];
+      expect(params[1]).toBe('%50\\%\\_\\\\done%');
+    });
+
+    test('rejects a non-string or over-long q with 400', async () => {
+      const repeated = await request(auditorApp()).get('/api/events?q=web&q=db');
+      expect(repeated.status).toBe(400);
+      const tooLong = await request(auditorApp()).get('/api/events').query({ q: 'x'.repeat(201) });
+      expect(tooLong.status).toBe(400);
+      expect(mockPoolQuery).not.toHaveBeenCalled();
+    });
+
     test('serves the action catalog', async () => {
       const res = await request(auditorApp()).get('/api/events/catalog');
       expect(res.status).toBe(200);

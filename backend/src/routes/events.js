@@ -81,12 +81,26 @@ router.post('/', requireAuth('admin', 'editor'), async (req, res) => {
 // GET /api/events — list with filters and real SQL pagination.
 router.get('/', requireAuth(), async (req, res) => {
   try {
-    const { action, actor_id, from, to, before_sequence } = req.query;
+    const { action, actor_id, from, to, before_sequence, q } = req.query;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 500);
 
     const conditions = ['tenant_id = $1'];
     const params = [requestTenantId(req)];
 
+    if (q !== undefined && (typeof q !== 'string' || q.length > 200)) {
+      return res.status(400).json({ error: 'q must be a single string of at most 200 characters' });
+    }
+    if (q) {
+      // Escape LIKE wildcards so user input matches literally; backslash is
+      // the default ESCAPE character, so it must be escaped first too.
+      const escaped = q.replace(/[\\%_]/g, '\\$&');
+      params.push(`%${escaped}%`);
+      const n = params.length;
+      conditions.push(
+        `(action ILIKE $${n} OR actor->>'id' ILIKE $${n} OR actor->>'type' ILIKE $${n}` +
+        ` OR target->>'id' ILIKE $${n} OR target->>'type' ILIKE $${n} OR context::text ILIKE $${n})`
+      );
+    }
     if (action) {
       params.push(String(action));
       conditions.push(`action = $${params.length}`);

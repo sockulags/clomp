@@ -233,6 +233,7 @@ input[type="file"] { border: 1px dashed var(--rule); padding: 0.6rem; }
   font-size: 0.82rem;
 }
 .filter-sep { color: var(--faint); }
+.filter-bar .search-box { min-width: 15rem; flex: 0 1 auto; }
 
 .ledger {
   width: 100%;

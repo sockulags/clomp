@@ -45,8 +45,12 @@ Append an event to the chain. Auth: API key, or session `admin`/`editor`.
 
 List with filters and keyset pagination. Auth: any.
 
-Query: `action`, `actor_id`, `from`, `to` (ISO timestamps, on `occurred_at`),
-`before_sequence`, `limit` (1–500, default 50).
+Query: `q` (case-insensitive substring search across action, actor id/type,
+target id/type, and the context JSON; `%`/`_` are matched literally; a single
+string of ≤ 200 characters),
+`action`, `actor_id`, `from`, `to` (ISO timestamps, on `occurred_at`),
+`before_sequence`, `limit` (1–500, default 50). All filters compose, including
+with keyset pagination.
 
 **200** → `{ "events": […], "has_more": true, "next_before_sequence": 1235 }`
 
