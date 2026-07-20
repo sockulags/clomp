@@ -78,6 +78,7 @@ export default defineConfig({
             { text: 'REST API', link: '/reference/rest-api' },
             { text: 'CLI', link: '/reference/cli' },
             { text: 'Node.js SDK', link: '/reference/sdk' },
+            { text: 'Python SDK', link: '/reference/sdk-python' },
             { text: 'Action catalog', link: '/reference/action-catalog' },
             { text: 'Hash chain specification', link: '/reference/hash-chain' },
             { text: 'Threat model', link: '/reference/threat-model' },
