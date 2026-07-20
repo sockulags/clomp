@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getPool } = require('../database');
+const logger = require('../logger');
 
 const KEY_PREFIX = 'clomp_live_';
 
@@ -11,9 +12,14 @@ function generateApiKey() {
   return KEY_PREFIX + crypto.randomBytes(32).toString('hex');
 }
 
+// last_used_at is refreshed at most once per key per this interval, so busy
+// keys do not cause a write per request.
+const LAST_USED_THROTTLE_MS = 60 * 1000;
+
 /**
  * Resolve X-API-Key into req.apiKey ({ id, tenant_id, name }).
  * Keys are stored hashed; a leaked database does not leak usable keys.
+ * Expired keys (expires_at in the past) are rejected exactly like revoked ones.
  * Does not reject on its own — pair with requireAuth in routes.
  */
 async function attachApiKey(req, res, next) {
@@ -22,11 +28,27 @@ async function attachApiKey(req, res, next) {
     if (!key || typeof key !== 'string') return next();
 
     const { rows } = await getPool().query(
-      'SELECT id, tenant_id, name FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL',
+      `SELECT id, tenant_id, name, last_used_at FROM api_keys
+       WHERE key_hash = $1 AND revoked_at IS NULL
+         AND (expires_at IS NULL OR expires_at > now())`,
       [hashKey(key)]
     );
     if (rows.length) {
-      req.apiKey = rows[0];
+      const { id, tenant_id, name, last_used_at } = rows[0];
+      req.apiKey = { id, tenant_id, name };
+
+      // Throttled usage tracking, fire-and-forget like sessions: it must
+      // never block or break authentication. The JS check skips the round
+      // trip on the common path; the WHERE clause repeats it so concurrent
+      // requests (or multiple app instances) still write at most about once
+      // per interval.
+      if (!last_used_at || Date.now() - new Date(last_used_at).getTime() >= LAST_USED_THROTTLE_MS) {
+        getPool().query(
+          `UPDATE api_keys SET last_used_at = now()
+           WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - ($2 * interval '1 millisecond'))`,
+          [id, LAST_USED_THROTTLE_MS]
+        ).catch((err) => logger.warn({ err, keyId: id }, 'Failed to update api_keys.last_used_at'));
+      }
     }
     return next();
   } catch (err) {

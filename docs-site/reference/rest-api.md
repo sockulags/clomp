@@ -157,9 +157,21 @@ return **501**.
 | `POST /api/users` | admin | `{ email, name, role }`; returns a one-time `initial_password` |
 | `PATCH /api/users/:id` | admin | `{ role?, disabled? }`; you cannot disable or demote yourself |
 | `POST /api/users/:id/reset-password` | admin | New one-time password; clears TOTP, revokes sessions |
-| `GET /api/keys` | admin | |
-| `POST /api/keys` | admin | `{ name }`; the full key is returned exactly once |
+| `GET /api/keys` | admin | Includes `expires_at` and `last_used_at` per key |
+| `POST /api/keys` | admin | `{ name, expires_at? }`; the full key is returned exactly once |
+| `POST /api/keys/:id/rotate` | admin | `{ expires_at? }`; atomically revokes the key and creates a replacement with the same name — the new secret is returned exactly once |
 | `DELETE /api/keys/:id` | admin | Revoke |
+
+API key lifecycle notes:
+
+- `expires_at` (optional, ISO 8601, must be in the future) makes a key stop
+  authenticating at that instant — an expired key is rejected exactly like a
+  revoked one. Existing keys without an expiry keep working.
+- `last_used_at` records when the key last authenticated, throttled to at most
+  one write per key per minute (so it can lag by up to a minute).
+- Rotation does not inherit the old key's expiry: pass `expires_at` in the
+  rotate body, or omit it for a non-expiring replacement. (The web UI passes
+  the old key's still-future expiry along automatically.)
 
 ## Health
 

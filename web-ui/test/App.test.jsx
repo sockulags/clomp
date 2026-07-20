@@ -24,6 +24,7 @@ vi.mock('../src/api', () => {
     resetPassword: vi.fn(),
     keys: vi.fn(),
     createKey: vi.fn(),
+    rotateKey: vi.fn(),
     revokeKey: vi.fn(),
     changePassword: vi.fn(),
     sessions: vi.fn(),
@@ -220,6 +221,46 @@ describe('App', () => {
       frequency: 'quarterly',
       grace_days: 14
     });
+  });
+
+  it('shows API key lifecycle status and rotates a key from the Admin view', async () => {
+    primeLoggedIn(ADMIN);
+    api.users.mockResolvedValue({ data: { users: [] } });
+    const now = Date.now();
+    const day = 24 * 3600 * 1000;
+    const k1Expiry = new Date(now + 30 * day).toISOString();
+    api.keys.mockResolvedValue({
+      data: {
+        keys: [
+          { id: 'k1', name: 'ci-bot', prefix: 'clomp_live_aaaa', created_at: new Date(now - 2 * day).toISOString(), revoked_at: null, expires_at: k1Expiry, last_used_at: new Date(now - 3600 * 1000).toISOString() },
+          { id: 'k2', name: 'old-bot', prefix: 'clomp_live_bbbb', created_at: new Date(now - 200 * day).toISOString(), revoked_at: null, expires_at: null, last_used_at: new Date(now - 90 * day).toISOString() },
+          { id: 'k3', name: 'dead-bot', prefix: 'clomp_live_cccc', created_at: new Date(now - 200 * day).toISOString(), revoked_at: null, expires_at: new Date(now - 10 * day).toISOString(), last_used_at: null }
+        ]
+      }
+    });
+    const rotatedSecret = 'clomp_live_' + 'f'.repeat(64);
+    api.rotateKey.mockResolvedValue({
+      data: { id: 'k9', name: 'ci-bot', key: rotatedSecret, expires_at: null, rotated_from: 'k1' }
+    });
+
+    render(<App />);
+    const user = userEvent.setup();
+    await findLedgerCell();
+    await user.click(screen.getByText('Admin'));
+
+    expect(await screen.findByText('ci-bot')).toBeInTheDocument();
+    expect(screen.getByText('active')).toBeInTheDocument();
+    expect(screen.getByText('stale')).toBeInTheDocument();
+    expect(screen.getByText('expired')).toBeInTheDocument();
+
+    // Rotation asks for confirmation (it kills the live key immediately).
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(screen.getAllByText('rotate')[0]);
+    // Rotation preserves the key's (still-future) expiry.
+    await waitFor(() => expect(api.rotateKey).toHaveBeenCalledWith('k1', k1Expiry));
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+    expect(await screen.findByText(rotatedSecret)).toBeInTheDocument();
   });
 
   it('signs out', async () => {

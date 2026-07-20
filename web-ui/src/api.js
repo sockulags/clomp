@@ -52,7 +52,8 @@ export const api = {
   patchUser: (id, body) => client.patch(`/users/${id}`, body),
   resetPassword: (id) => client.post(`/users/${id}/reset-password`),
   keys: () => client.get('/keys'),
-  createKey: (name) => client.post('/keys', { name }),
+  createKey: (name, expires_at) => client.post('/keys', { name, ...(expires_at && { expires_at }) }),
+  rotateKey: (id, expires_at) => client.post(`/keys/${id}/rotate`, expires_at ? { expires_at } : {}),
   revokeKey: (id) => client.delete(`/keys/${id}`)
 };
 

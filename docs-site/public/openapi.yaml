@@ -432,7 +432,7 @@ paths:
       summary: List API keys (admin)
       security: [{ session: [] }]
       responses:
-        '200': { description: Keys (prefixes only) }
+        '200': { description: Keys (prefixes only) with created_at, revoked_at, expires_at, last_used_at }
     post:
       tags: [admin]
       summary: Create an API key (admin) — the full key is returned exactly once
@@ -446,8 +446,51 @@ paths:
               required: [name]
               properties:
                 name: { type: string }
+                expires_at:
+                  type: string
+                  format: date-time
+                  description: Optional expiry; must be in the future. An expired key is rejected like a revoked one.
       responses:
         '201': { description: Created — save the key now }
+        '400': { description: Missing name or invalid expires_at }
+
+  /api/keys/{id}/rotate:
+    post:
+      tags: [admin]
+      summary: Rotate an API key (admin) — atomically revokes it and creates a replacement with the same name
+      description: >
+        The new secret is returned exactly once. The replacement does not inherit
+        the old key's expiry; pass expires_at to set one, or omit it for a
+        non-expiring key.
+      security: [{ session: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expires_at:
+                  type: string
+                  format: date-time
+                  description: Optional expiry for the replacement key; must be in the future.
+      responses:
+        '201': { description: Rotated — save the new key now (includes rotated_from) }
+        '400': { description: Invalid expires_at }
+        '404': { description: Key not found or already revoked }
+
+  /api/keys/{id}:
+    delete:
+      tags: [admin]
+      summary: Revoke an API key (admin) — kept for the audit trail, never hard-deleted
+      security: [{ session: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Revoked }
+        '404': { description: Key not found or already revoked }
 
   /health:
     get:

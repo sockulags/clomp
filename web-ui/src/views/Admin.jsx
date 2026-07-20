@@ -83,10 +83,36 @@ function Users() {
   );
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STALE_AFTER_DAYS = 30;
+
+const EXPIRY_CHOICES = [
+  { value: '', label: 'never expires' },
+  { value: '30', label: 'expires in 30 days' },
+  { value: '90', label: 'expires in 90 days' },
+  { value: '365', label: 'expires in 1 year' }
+];
+
+function expiresAtFromChoice(days) {
+  if (!days) return undefined;
+  return new Date(Date.now() + Number(days) * DAY_MS).toISOString();
+}
+
+/** Lifecycle status of a key: revoked, expired, stale (unused 30+ days) or active. */
+function keyStatus(k) {
+  if (k.revoked_at) return 'revoked';
+  if (k.expires_at && new Date(k.expires_at).getTime() <= Date.now()) return 'expired';
+  const lastActivity = k.last_used_at || k.created_at;
+  if (Date.now() - new Date(lastActivity).getTime() > STALE_AFTER_DAYS * DAY_MS) return 'stale';
+  return 'active';
+}
+
 function ApiKeys() {
   const [keys, setKeys] = useState([]);
   const [name, setName] = useState('');
+  const [expiryDays, setExpiryDays] = useState('');
   const [newKey, setNewKey] = useState(null);
+  const [error, setError] = useState(null);
 
   const load = useCallback(() => {
     api.keys().then(res => setKeys(res.data.keys)).catch(() => {});
@@ -95,15 +121,45 @@ function ApiKeys() {
 
   const create = async (e) => {
     e.preventDefault();
-    const res = await api.createKey(name);
-    setNewKey(res.data);
-    setName('');
-    load();
+    setError(null);
+    try {
+      const res = await api.createKey(name, expiresAtFromChoice(expiryDays));
+      setNewKey({ ...res.data, label: 'Key' });
+      setName('');
+      setExpiryDays('');
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to create key');
+    }
+  };
+
+  const rotate = async (k) => {
+    // Rotation revokes the live key immediately — services using it start
+    // failing until the new secret is distributed.
+    if (!window.confirm(`Rotate “${k.name}”? The current key stops working immediately.`)) return;
+    setError(null);
+    try {
+      // Preserve the key's expiry policy: the replacement keeps the same
+      // expires_at (the backend does not inherit it). An already-past expiry
+      // is not carried over — the rotated key would be dead on arrival.
+      const keepExpiry = k.expires_at && new Date(k.expires_at).getTime() > Date.now()
+        ? k.expires_at : undefined;
+      const res = await api.rotateKey(k.id, keepExpiry);
+      setNewKey({ ...res.data, label: 'Rotated key' });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to rotate key');
+    }
   };
 
   const revoke = async (k) => {
-    await api.revokeKey(k.id);
-    load();
+    setError(null);
+    try {
+      await api.revokeKey(k.id);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to revoke key');
+    }
   };
 
   return (
@@ -111,29 +167,41 @@ function ApiKeys() {
       <h2>API keys</h2>
       <p className="hint">
         Machine writers (CI, services) append events with these keys. Keys are
-        stored hashed — the full key is shown exactly once.
+        stored hashed — the full key is shown exactly once. Rotating a key
+        revokes it and issues a replacement in one step.
       </p>
       <table className="admin-table">
-        <thead><tr><th>name</th><th>prefix</th><th>created</th><th></th></tr></thead>
+        <thead><tr><th>name</th><th>prefix</th><th>created</th><th>expires</th><th>last used</th><th>status</th><th></th></tr></thead>
         <tbody>
-          {keys.map(k => (
-            <tr key={k.id} className={k.revoked_at ? 'disabled-row' : ''}>
-              <td>{k.name}</td>
-              <td className="mono">{k.prefix}…</td>
-              <td className="mono time">{String(k.created_at).slice(0, 10)}</td>
-              <td className="row-actions">
-                {k.revoked_at
-                  ? <span className="hint">revoked</span>
-                  : <button className="btn tiny" onClick={() => revoke(k)}>revoke</button>}
-              </td>
-            </tr>
-          ))}
+          {keys.map(k => {
+            const status = keyStatus(k);
+            // Only revoked rows are struck through: an expired key still
+            // offers actions (rotate mints a working replacement).
+            return (
+              <tr key={k.id} className={status === 'revoked' ? 'disabled-row' : ''}>
+                <td>{k.name}</td>
+                <td className="mono">{k.prefix}…</td>
+                <td className="mono time">{String(k.created_at).slice(0, 10)}</td>
+                <td className="mono time">{k.expires_at ? String(k.expires_at).slice(0, 10) : 'never'}</td>
+                <td className="mono time">{k.last_used_at ? String(k.last_used_at).slice(0, 10) : 'never'}</td>
+                <td><span className={`role-chip key-status-${status}`}>{status}</span></td>
+                <td className="row-actions">
+                  {status !== 'revoked' && (
+                    <>
+                      <button className="btn tiny" onClick={() => rotate(k)}>rotate</button>
+                      <button className="btn tiny" onClick={() => revoke(k)}>revoke</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
       {newKey && (
         <div className="one-time">
-          <strong>Key “{newKey.name}”:</strong>
+          <strong>{newKey.label} “{newKey.name}”:</strong>
           <code className="mono">{newKey.key}</code>
           <span className="hint">Shown once — store it in your secret manager now.</span>
         </div>
@@ -141,8 +209,12 @@ function ApiKeys() {
 
       <form className="inline-form" onSubmit={create}>
         <input placeholder="key name (e.g. ci-bot)" value={name} onChange={e => setName(e.target.value)} required />
+        <select value={expiryDays} onChange={e => setExpiryDays(e.target.value)} aria-label="Key expiry">
+          {EXPIRY_CHOICES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
         <button className="btn primary" type="submit">Create key</button>
       </form>
+      {error && <p className="form-error">{error}</p>}
     </div>
   );
 }

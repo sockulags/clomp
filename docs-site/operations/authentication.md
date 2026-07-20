@@ -16,6 +16,25 @@ services, cron jobs. They are created by an admin, shown once, stored as
 SHA-256 hashes, and revocable. An API key can record and read events but can
 never manage users, keys or schedules.
 
+### API key lifecycle
+
+Auditors will ask how keys to the audit trail itself are rotated — clomp
+gives each key a full lifecycle:
+
+- **Expiry** — a key can be created with an optional `expires_at`. An
+  expired key is rejected exactly like a revoked one. Keys without an
+  expiry keep working forever (backwards compatible).
+- **Usage tracking** — `last_used_at` is stamped when a key authenticates
+  (throttled to once a minute per key), so you can see which keys are
+  actually in use. The Admin view flags keys unused for 30+ days as
+  **stale** — prime candidates for revocation.
+- **Rotation** — `POST /api/keys/:id/rotate` (or the **rotate** button in
+  the Admin view) atomically revokes the old key and issues a replacement
+  with the same name. The new secret is shown once; the revoked key stays
+  in the list for the audit trail. The API does not inherit the old key's
+  expiry — set `expires_at` in the rotate body. The Admin view carries a
+  still-valid expiry over to the replacement automatically.
+
 ## Passwords
 
 - Hashed with **argon2id**.

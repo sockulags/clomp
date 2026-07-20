@@ -4,6 +4,16 @@ All notable changes to clomp. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver
 (pre-1.0: minor bumps may contain breaking changes).
 
+## [Unreleased]
+
+### Added
+- **API key lifecycle**: optional `expires_at` at creation (an expired key
+  is rejected like a revoked one; existing keys keep working),
+  `last_used_at` usage tracking (throttled to one write per key per
+  minute), and atomic rotation (`POST /api/keys/:id/rotate`) that revokes
+  the old key and returns the replacement secret once. The Admin view
+  shows expiry, last-used and a stale flag for keys unused for 30+ days.
+
 ## [0.2.0-alpha] — 2026-07-15
 
 ### Added

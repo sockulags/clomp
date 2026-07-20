@@ -324,6 +324,8 @@ input[type="file"] { border: 1px dashed var(--rule); padding: 0.6rem; }
   border-radius: 2px;
 }
 .row-actions { display: flex; gap: 0.4rem; }
+.key-status-expired, .key-status-revoked { color: var(--danger); border-color: var(--danger); }
+.key-status-stale { color: var(--warn); border-color: var(--warn); }
 
 .inline-form {
   display: flex;
