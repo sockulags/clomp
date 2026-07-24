@@ -5,33 +5,68 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "deps(backend)"
     labels:
       - "dependencies"
       - "backend"
-    
+    groups:
+      backend-prod:
+        dependency-type: "production"
+        update-types: ["minor", "patch"]
+      backend-dev:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+    ignore:
+      # argon2 >=0.45 publishes no musl/Node-20 prebuild, so installing it in
+      # the node:20-alpine image falls back to node-gyp and fails on the missing
+      # Python toolchain. Drop this ignore once backend/Dockerfile moves to
+      # node:22-alpine or newer.
+      - dependency-name: "argon2"
+        versions: [">=0.45.0"]
+
   - package-ecosystem: "npm"
     directory: "/web-ui"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     commit-message:
       prefix: "deps(web-ui)"
     labels:
       - "dependencies"
       - "web-ui"
-    
+    groups:
+      # jest-dom 7 requires @testing-library/dom as a real peer, so the testing
+      # packages have to resolve in one lockfile rather than one PR at a time.
+      web-ui-testing:
+        patterns:
+          - "@testing-library/*"
+          - "vitest"
+          - "@vitest/*"
+          - "jsdom"
+      web-ui-build:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+      web-ui-routine:
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     commit-message:
       prefix: "deps(ci)"
     labels:
       - "dependencies"
       - "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
