@@ -28,7 +28,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=24"
+    "node": ">=18"
   },
   "repository": {
     "type": "git",
