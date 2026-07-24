@@ -149,7 +149,17 @@ describe('metrics module', () => {
   });
 
   describe('metricsHandler', () => {
+    test('refuses to serve when mounted directly without a token', async () => {
+      // Defence in depth: mountMetricsEndpoint already refuses to register the
+      // route, but the handler is exported, so a future caller wiring it up by
+      // hand must not get an unauthenticated dump of tenant-labelled metrics.
+      const res = await request(makeApp()).get('/metrics');
+      expect(res.status).toBe(404);
+      expect(res.text).not.toContain('clomp_events_ingested_total');
+    });
+
     test('serves the Prometheus text exposition', async () => {
+      process.env.METRICS_ALLOW_UNAUTHENTICATED = 'true';
       metrics.recordEventIngested(TENANT);
       const res = await request(makeApp()).get('/metrics');
       expect(res.status).toBe(200);

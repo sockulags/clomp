@@ -190,13 +190,19 @@ function httpMetricsMiddleware(req, res, next) {
 // --- Endpoint ----------------------------------------------------------------
 
 /**
- * GET /metrics handler. Requires Bearer METRICS_TOKEN when one is set; the
- * token-less case is not decided here but at mount time (see
- * mountMetricsEndpoint), where the route is simply never registered unless
- * unauthenticated access was asked for explicitly.
+ * GET /metrics handler. Requires Bearer METRICS_TOKEN when one is set.
+ *
+ * mountMetricsEndpoint already refuses to register this route when no token is
+ * configured, so in the shipped wiring the token-less case never reaches here.
+ * The same check is repeated below anyway: this handler is exported, and the
+ * cost of a future caller mounting it directly should be a 404, not silently
+ * serving tenant-labelled metrics to anyone who can reach the port.
  */
 async function metricsHandler(req, res) {
   const token = configuredToken();
+  if (!token && !allowsUnauthenticated()) {
+    return res.status(404).json({ error: 'Not found' });
+  }
   if (token) {
     const header = req.headers.authorization || '';
     const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
