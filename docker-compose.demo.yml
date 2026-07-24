@@ -50,8 +50,13 @@ services:
       dockerfile: Dockerfile
     container_name: clomp-demo-backend
     ports:
+      # Loopback only. The demo ships a published admin password on purpose,
+      # so a published port on 0.0.0.0 would put an admin login on the public
+      # internet the moment anyone runs this file on a cloud VM. Override
+      # CLOMP_DEMO_BIND if you deliberately want it reachable.
       - target: 3000
         published: "${CLOMP_DEMO_API_PORT:-3001}"
+        host_ip: "${CLOMP_DEMO_BIND:-127.0.0.1}"
         protocol: tcp
     environment:
       - PORT=3000
@@ -98,8 +103,10 @@ services:
       dockerfile: Dockerfile
     container_name: clomp-demo-web-ui
     ports:
+      # Loopback only — see the backend service above.
       - target: 80
         published: "${CLOMP_DEMO_UI_PORT:-8080}"
+        host_ip: "${CLOMP_DEMO_BIND:-127.0.0.1}"
         protocol: tcp
     depends_on:
       backend:
