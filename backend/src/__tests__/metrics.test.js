@@ -17,9 +17,14 @@ jest.mock('../services/schedules', () => ({
 
 // Load the module with metrics enabled so the default process metrics
 // (registered at module load) are present for the handler test below.
-const savedEnv = { METRICS_ENABLED: process.env.METRICS_ENABLED, METRICS_TOKEN: process.env.METRICS_TOKEN };
+const savedEnv = {
+  METRICS_ENABLED: process.env.METRICS_ENABLED,
+  METRICS_TOKEN: process.env.METRICS_TOKEN,
+  METRICS_ALLOW_UNAUTHENTICATED: process.env.METRICS_ALLOW_UNAUTHENTICATED
+};
 process.env.METRICS_ENABLED = 'true';
 const metrics = require('../metrics');
+const logger = require('../logger');
 
 const TENANT = 'aaaaaaaa-0000-0000-0000-000000000001';
 
@@ -29,12 +34,20 @@ function makeApp() {
   return app;
 }
 
+/** An app wired up the way server.js does it, so the mount gate is exercised. */
+function makeMountedApp() {
+  const app = express();
+  const mounted = metrics.mountMetricsEndpoint(app);
+  return { app, mounted };
+}
+
 describe('metrics module', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     metrics.register.resetMetrics();
     delete process.env.METRICS_ENABLED;
     delete process.env.METRICS_TOKEN;
+    delete process.env.METRICS_ALLOW_UNAUTHENTICATED;
     mockPoolQuery.mockResolvedValue({ rows: [] });
     mockOverdueCountByTenant.mockResolvedValue(new Map());
   });
@@ -136,7 +149,17 @@ describe('metrics module', () => {
   });
 
   describe('metricsHandler', () => {
+    test('refuses to serve when mounted directly without a token', async () => {
+      // Defence in depth: mountMetricsEndpoint already refuses to register the
+      // route, but the handler is exported, so a future caller wiring it up by
+      // hand must not get an unauthenticated dump of tenant-labelled metrics.
+      const res = await request(makeApp()).get('/metrics');
+      expect(res.status).toBe(404);
+      expect(res.text).not.toContain('clomp_events_ingested_total');
+    });
+
     test('serves the Prometheus text exposition', async () => {
+      process.env.METRICS_ALLOW_UNAUTHENTICATED = 'true';
       metrics.recordEventIngested(TENANT);
       const res = await request(makeApp()).get('/metrics');
       expect(res.status).toBe(200);
@@ -154,6 +177,119 @@ describe('metrics module', () => {
 
       const ok = await request(makeApp()).get('/metrics').set('Authorization', 'Bearer sekret');
       expect(ok.status).toBe(200);
+    });
+  });
+
+  describe('mountMetricsEndpoint', () => {
+    test('does not mount anything when metrics are disabled', async () => {
+      const { app, mounted } = makeMountedApp();
+
+      expect(mounted).toBe(false);
+      expect((await request(app).get('/metrics')).status).toBe(404);
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    test('refuses the endpoint when enabled without a token', async () => {
+      process.env.METRICS_ENABLED = 'true';
+
+      const { app, mounted } = makeMountedApp();
+
+      expect(mounted).toBe(false);
+      expect((await request(app).get('/metrics')).status).toBe(404);
+
+      // The startup log has to name exactly what to set to fix it.
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      const message = logger.error.mock.calls[0][0];
+      expect(message).toContain('METRICS_TOKEN');
+      expect(message).toContain('METRICS_ALLOW_UNAUTHENTICATED=true');
+    });
+
+    test('an empty METRICS_TOKEN counts as no token', async () => {
+      process.env.METRICS_ENABLED = 'true';
+      process.env.METRICS_TOKEN = '';
+
+      const { app, mounted } = makeMountedApp();
+
+      expect(mounted).toBe(false);
+      expect((await request(app).get('/metrics')).status).toBe(404);
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    test.each(['TRUE', 'true ', '1', 'yes', ''])(
+      'METRICS_ALLOW_UNAUTHENTICATED=%p is not the escape hatch',
+      async (value) => {
+        process.env.METRICS_ENABLED = 'true';
+        process.env.METRICS_ALLOW_UNAUTHENTICATED = value;
+
+        const { app, mounted } = makeMountedApp();
+
+        expect(mounted).toBe(false);
+        expect((await request(app).get('/metrics')).status).toBe(404);
+      }
+    );
+
+    test('refusing the endpoint still leaves the counters recording', async () => {
+      process.env.METRICS_ENABLED = 'true';
+
+      const { mounted } = makeMountedApp();
+      expect(mounted).toBe(false);
+
+      metrics.recordEventIngested(TENANT);
+      metrics.recordCheckpointSigned(TENANT);
+
+      const body = await metrics.register.metrics();
+      expect(body).toContain(`clomp_events_ingested_total{tenant_id="${TENANT}"} 1`);
+      expect(body).toContain(`clomp_checkpoints_signed_total{tenant_id="${TENANT}"} 1`);
+    });
+
+    test('METRICS_ALLOW_UNAUTHENTICATED=true serves the endpoint, with a warning', async () => {
+      process.env.METRICS_ENABLED = 'true';
+      process.env.METRICS_ALLOW_UNAUTHENTICATED = 'true';
+      metrics.recordEventIngested(TENANT);
+
+      const { app, mounted } = makeMountedApp();
+
+      expect(mounted).toBe(true);
+      const res = await request(app).get('/metrics');
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('clomp_events_ingested_total');
+
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn.mock.calls[0][0]).toContain('without authentication');
+    });
+
+    test('METRICS_TOKEN mounts the endpoint behind bearer auth', async () => {
+      process.env.METRICS_ENABLED = 'true';
+      process.env.METRICS_TOKEN = 'sekret';
+      metrics.recordEventIngested(TENANT);
+
+      const { app, mounted } = makeMountedApp();
+
+      expect(mounted).toBe(true);
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).not.toHaveBeenCalled();
+
+      expect((await request(app).get('/metrics')).status).toBe(401);
+      expect((await request(app).get('/metrics').set('Authorization', 'Bearer wrong')).status).toBe(401);
+      expect((await request(app).get('/metrics').set('Authorization', 'sekret')).status).toBe(401);
+
+      const ok = await request(app).get('/metrics').set('Authorization', 'Bearer sekret');
+      expect(ok.status).toBe(200);
+      expect(ok.text).toContain('clomp_events_ingested_total');
+    });
+
+    test('a token wins over the escape hatch when both are set', async () => {
+      process.env.METRICS_ENABLED = 'true';
+      process.env.METRICS_TOKEN = 'sekret';
+      process.env.METRICS_ALLOW_UNAUTHENTICATED = 'true';
+
+      const { app, mounted } = makeMountedApp();
+
+      expect(mounted).toBe(true);
+      expect((await request(app).get('/metrics')).status).toBe(401);
+      expect((await request(app).get('/metrics').set('Authorization', 'Bearer sekret')).status).toBe(200);
     });
   });
 });

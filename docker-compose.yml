@@ -36,6 +36,7 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
       - METRICS_ENABLED=${METRICS_ENABLED:-}
       - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - METRICS_ALLOW_UNAUTHENTICATED=${METRICS_ALLOW_UNAUTHENTICATED:-}
     volumes:
       - backend-data:/app/data
     depends_on:

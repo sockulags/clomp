@@ -146,12 +146,13 @@ app.get('/health', healthCheckLimiter, async (req, res) => {
 });
 
 // Prometheus metrics — opt-in (METRICS_ENABLED=true) because the output
-// exposes operational details (tenant ids, ingestion rates). Optionally
-// protected with a bearer token via METRICS_TOKEN; see docs on monitoring.
-if (metrics.isEnabled()) {
-  logger.info('Prometheus metrics enabled at /metrics');
-  app.get('/metrics', metrics.metricsHandler);
-}
+// exposes operational details (tenant ids, ingestion rates), and authenticated
+// by default: without METRICS_TOKEN (or an explicit
+// METRICS_ALLOW_UNAUTHENTICATED=true) the route is left unmounted and the
+// reason logged, rather than served to whoever reaches the port. Misconfigured
+// telemetry must not keep the audit trail from starting, so this never throws.
+// See docs on monitoring.
+metrics.mountMetricsEndpoint(app);
 
 // API routes
 app.use('/api/auth', authRoutes);

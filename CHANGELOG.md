@@ -6,6 +6,22 @@ All notable changes to clomp. The format follows
 
 ## [Unreleased]
 
+### Security
+- **`/metrics` now requires a token by default.** `METRICS_ENABLED=true`
+  without `METRICS_TOKEN` used to serve the full registry — tenant ids,
+  ingestion rates, checkpoint ages — to anyone who could reach the port.
+  The route is now left unmounted in that case (`/metrics` answers 404) and
+  the backend logs an error naming what to set. Nothing else is affected:
+  the server still starts, still records events, and the in-memory counters
+  keep updating — an audit trail must not go down because its telemetry is
+  misconfigured.
+
+  **Migration**: if you enabled metrics without a token, either set
+  `METRICS_TOKEN` (`openssl rand -hex 32`) and give your scraper the bearer
+  token, or set `METRICS_ALLOW_UNAUTHENTICATED=true` to keep the previous
+  unauthenticated behaviour on a trusted network — that logs a warning at
+  startup. Installs that already set `METRICS_TOKEN` are unaffected.
+
 ### Added
 - **API key lifecycle**: optional `expires_at` at creation (an expired key
   is rejected like a revoked one; existing keys keep working),

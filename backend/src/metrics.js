@@ -12,8 +12,10 @@ const { overdueCountByTenant } = require('./services/schedules');
  * the /metrics endpoint, the per-request HTTP histogram middleware, and the
  * default Node.js process metrics — is only active when METRICS_ENABLED=true.
  * Because the output exposes operational details — tenant ids, ingestion
- * rates, checkpoint cadence — the endpoint should stay on a trusted network
- * and/or behind METRICS_TOKEN (Bearer auth).
+ * rates, checkpoint cadence — the endpoint is authenticated by default:
+ * enabling metrics without METRICS_TOKEN (Bearer auth) leaves /metrics
+ * unmounted unless METRICS_ALLOW_UNAUTHENTICATED=true says so deliberately.
+ * See mountMetricsEndpoint() at the bottom of this file.
  *
  * Two kinds of metrics live here:
  *  - Instrumented: services call the thin record*() helpers below
@@ -33,6 +35,16 @@ const register = new client.Registry();
 
 function isEnabled() {
   return process.env.METRICS_ENABLED === 'true';
+}
+
+/** The deliberate opt-out from authentication, for trusted networks only. */
+function allowsUnauthenticated() {
+  return process.env.METRICS_ALLOW_UNAUTHENTICATED === 'true';
+}
+
+/** The configured bearer token, treating an empty value as "not set". */
+function configuredToken() {
+  return process.env.METRICS_TOKEN || '';
 }
 
 // Default process metrics (event-loop lag, GC, memory) install observers and
@@ -177,9 +189,20 @@ function httpMetricsMiddleware(req, res, next) {
 
 // --- Endpoint ----------------------------------------------------------------
 
-/** GET /metrics handler. Requires Bearer METRICS_TOKEN when one is set. */
+/**
+ * GET /metrics handler. Requires Bearer METRICS_TOKEN when one is set.
+ *
+ * mountMetricsEndpoint already refuses to register this route when no token is
+ * configured, so in the shipped wiring the token-less case never reaches here.
+ * The same check is repeated below anyway: this handler is exported, and the
+ * cost of a future caller mounting it directly should be a 404, not silently
+ * serving tenant-labelled metrics to anyone who can reach the port.
+ */
 async function metricsHandler(req, res) {
-  const token = process.env.METRICS_TOKEN;
+  const token = configuredToken();
+  if (!token && !allowsUnauthenticated()) {
+    return res.status(404).json({ error: 'Not found' });
+  }
   if (token) {
     const header = req.headers.authorization || '';
     const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
@@ -196,9 +219,50 @@ async function metricsHandler(req, res) {
   }
 }
 
+/**
+ * Mounts GET /metrics on the given Express app — or refuses to, and logs
+ * exactly what is missing. Returns whether the route was mounted.
+ *
+ * The endpoint is authenticated by default: METRICS_ENABLED=true on its own
+ * is not enough, because a token-less endpoint hands tenant ids, ingestion
+ * rates and checkpoint ages to anyone who can reach the port. Set
+ * METRICS_TOKEN, or say out loud with METRICS_ALLOW_UNAUTHENTICATED=true
+ * that the network is trusted.
+ *
+ * Refusing the endpoint never stops the process. An audit trail must keep
+ * recording even when its telemetry is misconfigured, so a bad metrics setup
+ * costs you the scrape target and nothing else — the in-memory counters and
+ * gauges keep updating either way.
+ */
+function mountMetricsEndpoint(app) {
+  if (!isEnabled()) return false;
+
+  if (!configuredToken()) {
+    if (!allowsUnauthenticated()) {
+      logger.error(
+        'METRICS_ENABLED=true but METRICS_TOKEN is not set — /metrics is NOT served. ' +
+        'Set METRICS_TOKEN=<token> (openssl rand -hex 32) to require "Authorization: Bearer <token>", ' +
+        'or set METRICS_ALLOW_UNAUTHENTICATED=true to expose /metrics without authentication ' +
+        'on a trusted network. The backend keeps running and keeps recording events either way.'
+      );
+      return false;
+    }
+    logger.warn(
+      'METRICS_ALLOW_UNAUTHENTICATED=true — /metrics is served without authentication. ' +
+      'Anyone who can reach this port can read tenant ids, ingestion rates and checkpoint ages. ' +
+      'Set METRICS_TOKEN instead unless the network is genuinely trusted.'
+    );
+  }
+
+  app.get('/metrics', metricsHandler);
+  logger.info('Prometheus metrics enabled at /metrics');
+  return true;
+}
+
 module.exports = {
   register,
   isEnabled,
+  mountMetricsEndpoint,
   metricsHandler,
   httpMetricsMiddleware,
   recordEventIngested,

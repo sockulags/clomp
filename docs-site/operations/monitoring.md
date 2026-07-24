@@ -8,15 +8,15 @@ anything overdue.
 
 ## Enabling the endpoint
 
-Metrics are **off by default**. The output exposes operational details —
-tenant ids, ingestion rates, checkpoint cadence — so treat `/metrics` as
-internal infrastructure, not a public page:
+Metrics are **off by default**, and authenticated by default once on. The
+output exposes operational details — tenant ids, ingestion rates, checkpoint
+cadence — so treat `/metrics` as internal infrastructure, not a public page:
 
 ```bash
 # .env — must be exactly the string "true"
 METRICS_ENABLED=true
 
-# Optional but recommended: require "Authorization: Bearer <token>"
+# Required: /metrics requires "Authorization: Bearer <token>"
 # Generate one: openssl rand -hex 32
 METRICS_TOKEN=change-me-metrics-token
 ```
@@ -28,12 +28,42 @@ container. The endpoint then answers on the backend port:
 curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3001/metrics
 ```
 
+## When no token is set
+
+`METRICS_ENABLED=true` without a `METRICS_TOKEN` does **not** produce an open
+endpoint. The route is not mounted, `/metrics` answers 404, and the backend
+logs the error at startup:
+
+```
+METRICS_ENABLED=true but METRICS_TOKEN is not set — /metrics is NOT served.
+Set METRICS_TOKEN=<token> (openssl rand -hex 32) to require "Authorization:
+Bearer <token>", or set METRICS_ALLOW_UNAUTHENTICATED=true to expose /metrics
+without authentication on a trusted network. The backend keeps running and
+keeps recording events either way.
+```
+
+The backend starts normally and keeps recording, signing and verifying —
+misconfigured telemetry costs you the scrape target and nothing else. The
+in-memory counters keep updating too, so the values are all there as soon as
+the endpoint is configured properly and the process is restarted.
+
+If your scraper reaches the backend over a network you genuinely trust
+(compose network, VPN, cluster-internal) and you would rather not manage a
+token, ask for that explicitly:
+
+```bash
+METRICS_ENABLED=true
+METRICS_ALLOW_UNAUTHENTICATED=true
+```
+
+That serves `/metrics` unauthenticated, exactly as before, and logs a warning
+at startup so the choice is visible in the logs. Setting `METRICS_TOKEN` as
+well makes the token win: the endpoint stays behind bearer auth.
+
 ::: warning Exposure considerations
-Only enable metrics when the scraper reaches the backend over a trusted
-network (compose network, VPN, cluster-internal). If the backend port is
-reachable from anywhere else, set `METRICS_TOKEN` — and even then, prefer
-firewalling `/metrics` off at the reverse proxy. Metric values are not
-audit data, but they leak activity patterns.
+Metric values are not audit data, but they leak activity patterns. Prefer
+`METRICS_TOKEN` over `METRICS_ALLOW_UNAUTHENTICATED`, and either way prefer
+firewalling `/metrics` off at the reverse proxy as well.
 :::
 
 ## Metrics reference
