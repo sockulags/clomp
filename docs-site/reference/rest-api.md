@@ -87,6 +87,11 @@ Auth: API key, or session `admin`/`editor`.
 
 Download by content hash. Auth: any (auditors included).
 
+Scoped to the caller's tenant: a hash belonging to another tenant returns
+`404`, the same as a hash that does not exist. Identical bytes uploaded by two
+tenants are stored once but carry a metadata row — filename, uploader — per
+tenant.
+
 ## Export
 
 ### `GET /api/export/jsonl?from=&to=`

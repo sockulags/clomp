@@ -95,7 +95,10 @@ data that must be erased:
 1. Delete the file from `EVIDENCE_DIR` (files are stored at
    `<EVIDENCE_DIR>/<first two hex chars>/<sha256>`).
 2. Optionally delete its row from the `evidence_files` table (a normal
-   table; it also stores the uploader's identity).
+   table; it also stores the uploader's identity). Rows are per tenant, so
+   in multi-tenant mode deleting one tenant's row leaves the other tenants'
+   rows — and the file itself — in place. Delete the blob only when no rows
+   reference that hash any more.
 3. Remove the file from any backups per your backup retention policy.
 
 Afterward the chain still verifies, the event still shows *that* evidence

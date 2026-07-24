@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
 const { getPool } = require('../database');
-const { requireAuth } = require('../middleware/apikey');
+const { requireAuth, requestTenantId } = require('../middleware/apikey');
 const logger = require('../logger');
 
 const router = express.Router();
@@ -24,7 +24,9 @@ function evidencePath(sha256) {
 
 // POST /api/evidence — upload a file; returns { sha256, filename, size } to
 // embed in an event's evidence array. Content-addressed: the same bytes are
-// stored once no matter how many events reference them.
+// stored once on disk no matter how many events — or tenants — reference
+// them, but the metadata row is per tenant, so filename, uploader and
+// ownership never cross the tenant boundary.
 router.post('/', requireAuth('admin', 'editor'), upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'file field is required (multipart/form-data)' });
@@ -39,9 +41,9 @@ router.post('/', requireAuth('admin', 'editor'), upload.single('file'), async (r
 
     const uploadedBy = req.user ? req.user.email : `api_key:${req.apiKey.name}`;
     await getPool().query(
-      `INSERT INTO evidence_files (sha256, filename, size, content_type, uploaded_by)
-       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (sha256) DO NOTHING`,
-      [sha256, req.file.originalname, req.file.size, req.file.mimetype, uploadedBy]
+      `INSERT INTO evidence_files (tenant_id, sha256, filename, size, content_type, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id, sha256) DO NOTHING`,
+      [requestTenantId(req), sha256, req.file.originalname, req.file.size, req.file.mimetype, uploadedBy]
     );
 
     res.status(201).json({ sha256, filename: req.file.originalname, size: req.file.size });
@@ -52,13 +54,18 @@ router.post('/', requireAuth('admin', 'editor'), upload.single('file'), async (r
 });
 
 // GET /api/evidence/:sha256 — download; auditors included.
+// Scoped to the requesting tenant: a hash owned by another tenant is a 404,
+// not a 403, so the endpoint never confirms that someone else's file exists.
 router.get('/:sha256', requireAuth(), async (req, res) => {
   try {
     const sha256 = String(req.params.sha256).toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(sha256)) {
       return res.status(400).json({ error: 'Invalid sha256' });
     }
-    const { rows } = await getPool().query('SELECT filename, content_type FROM evidence_files WHERE sha256 = $1', [sha256]);
+    const { rows } = await getPool().query(
+      'SELECT filename, content_type FROM evidence_files WHERE tenant_id = $1 AND sha256 = $2',
+      [requestTenantId(req), sha256]
+    );
     const file = evidencePath(sha256);
     if (!rows.length || !fs.existsSync(file)) {
       return res.status(404).json({ error: 'Evidence not found' });

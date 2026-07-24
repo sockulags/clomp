@@ -21,6 +21,27 @@ All notable changes to clomp. The format follows
   token, or set `METRICS_ALLOW_UNAUTHENTICATED=true` to keep the previous
   unauthenticated behaviour on a trusted network — that logs a warning at
   startup. Installs that already set `METRICS_TOKEN` are unaffected.
+- **Evidence files are now scoped per tenant.** `evidence_files` was keyed on
+  the sha256 alone and `GET /api/evidence/:sha256` only required
+  authentication, so with `MULTI_TENANT=true` any authenticated principal of
+  one tenant could download another tenant's evidence if they knew its hash —
+  and because storage is deduplicated globally, the stored filename and
+  uploader were the first uploader's across the tenant boundary. Downloads are
+  now scoped to the requesting tenant (a foreign hash returns 404, never 403,
+  so the endpoint cannot confirm that someone else's file exists) and metadata
+  rows are per tenant. The bytes stay content-addressed in one copy on disk, so
+  anything that deletes evidence must count referencing rows, not files.
+
+  Migration `004_evidence_tenant_scope.sql` backfills ownership from the events
+  that reference each hash. On a single-tenant install — every install today,
+  since multi-tenant mode is opt-in — files that no event references are
+  assigned to that one tenant. On a multi-tenant install they are parked in
+  `evidence_files_unclaimed` with a warning instead of being guessed at, and
+  need attributing by hand before they can be downloaded again.
+- **Guard against the next one**: `tenant-scoping.test.js` fails the build when
+  a SQL statement touches a tenant-owned table without constraining
+  `tenant_id`. Exemptions require a written reason. This test fails on the
+  evidence code as it was shipped.
 
 ### Added
 - **API key lifecycle**: optional `expires_at` at creation (an expired key
