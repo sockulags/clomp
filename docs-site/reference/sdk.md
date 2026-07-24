@@ -4,6 +4,8 @@
 npm install @clomp/sdk-node
 ```
 
+Requires Node.js 24 or newer.
+
 ```js
 const Clomp = require('@clomp/sdk-node');
 

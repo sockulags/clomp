@@ -11,6 +11,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
     "axios": "^1.18.1",

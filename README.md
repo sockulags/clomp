@@ -185,6 +185,8 @@ Exports live in the UI (Export tab) or at `GET /api/export/jsonl` and
 
 ## Development
 
+Requires **Node.js 24+** — the same version the Docker images and CI run.
+
 ```bash
 # a database
 docker run -d --name clomp-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_USER=clomp -e POSTGRES_DB=clomp -p 5432:5432 postgres:16-alpine

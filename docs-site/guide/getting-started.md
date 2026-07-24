@@ -90,6 +90,8 @@ signed checkpoint. It refuses to run if the chain already has events.
 
 ## Development setup
 
+Requires **Node.js 24+** — the same version the Docker images and CI run.
+
 ```bash
 # a database
 docker run -d --name clomp-pg -e POSTGRES_PASSWORD=dev \
