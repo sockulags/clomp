@@ -72,7 +72,8 @@ All configuration is environment variables. With Docker Compose, set them in
 | Variable | Default | Description |
 |---|---|---|
 | `METRICS_ENABLED` | `false` | Expose Prometheus metrics at `GET /metrics` — see [Monitoring](/operations/monitoring) for exposure considerations |
-| `METRICS_TOKEN` | *(unset)* | When set, `/metrics` requires `Authorization: Bearer <token>` |
+| `METRICS_TOKEN` | *(unset)* | Required with `METRICS_ENABLED=true`: `/metrics` requires `Authorization: Bearer <token>`. Without it the route is not mounted (the backend still starts and keeps recording) |
+| `METRICS_ALLOW_UNAUTHENTICATED` | `false` | Escape hatch: serve `/metrics` without any authentication on a trusted network. Logs a warning at startup; ignored when `METRICS_TOKEN` is set |
 
 ## Rate limiting & logging
 
