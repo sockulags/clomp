@@ -8,6 +8,8 @@ Node.js client for [clomp](../README.md) — a tamper-evident audit trail for se
 npm install @clomp/sdk-node
 ```
 
+Requires Node.js 24 or newer.
+
 ## Usage
 
 ```javascript

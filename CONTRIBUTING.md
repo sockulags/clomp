@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This document provides guidelines a
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 24+
 - Docker & Docker Compose
 - Git
 

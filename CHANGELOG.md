@@ -51,6 +51,41 @@ All notable changes to clomp. The format follows
   the old key and returns the replacement secret once. The Admin view
   shows expiry, last-used and a stale flag for keys unused for 30+ days.
 
+### Changed
+- **BREAKING — the server now requires Node.js 24.** The backend and web-ui
+  images build on `node:24-alpine` and CI runs Node 24. The published images
+  are self-contained, so this only bites if you run the backend on your own
+  Node: anything older than 24 has to upgrade. Node 20 went out of active
+  support, and staying on it was blocking dependency updates that had
+  already moved past it.
+
+  `@clomp/sdk-node` deliberately keeps `engines: { node: ">=18" }`. It is a
+  plain HTTP client with no native dependencies, and the server's runtime
+  requirement is not the embedding application's — demanding Node 24 from
+  every consumer of the client would be a breaking change with no technical
+  driver behind it.
+
+  **Migration**: upgrade the host Node to 24+ before taking this release.
+  Nothing in the API, the database schema, the chain format, the export
+  format or the SDK contract changes.
+- `argon2` 0.44 → 0.45.1 (password hashing). 0.45 was held back because it
+  publishes no musl prebuild for Node 20; on Node 24 the musl prebuild is
+  used directly, with no node-gyp compile in the image.
+- Web UI test stack: `@testing-library/jest-dom` 6 → 7 and
+  `@testing-library/react` 16.3.1 → 16.3.2. jest-dom 7 requires Node 22+
+  and makes `@testing-library/dom` a real peer dependency, so it is now
+  declared explicitly in `web-ui/package.json` instead of being hoisted in
+  from `@testing-library/react`.
+
+### Security
+- Pinned `brace-expansion` to 5.0.8 through an override in `backend/`
+  (GHSA-mh99-v99m-4gvg, DoS, high). Every version up to 5.0.7 is affected
+  and the fix only exists in 5.0.8, while the transitive ranges under the
+  jest and eslint toolchains ask for `^1.1.11` / `^2.0.1` — so an override
+  is the only route, and `npm audit fix` would instead downgrade
+  `babel-jest` by five majors. Dev-only dependency, no production path, but
+  the audit gate is a real gate now and it should stay readable.
+
 ## [0.2.0-alpha] — 2026-07-15
 
 ### Added
