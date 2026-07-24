@@ -51,6 +51,27 @@ All notable changes to clomp. The format follows
   the old key and returns the replacement secret once. The Admin view
   shows expiry, last-used and a stale flag for keys unused for 30+ days.
 
+### Changed
+- **BREAKING — Node.js 24 is now the minimum.** The backend and web-ui
+  images build on `node:24-alpine`, CI runs Node 24, and `@clomp/sdk-node`
+  declares `engines: { node: ">=24" }` (was `>=18`). The published images
+  are self-contained, so this only bites if you run the backend, the SDK or
+  the CLI on your own Node: anything older than 24 has to upgrade. Node 20
+  went out of active support, and staying on it was blocking dependency
+  updates that had already moved past it.
+
+  **Migration**: upgrade the host Node to 24+ before taking this release.
+  Nothing in the API, the database schema, the chain format or the export
+  format changes.
+- `argon2` 0.44 → 0.45.1 (password hashing). 0.45 was held back because it
+  publishes no musl prebuild for Node 20; on Node 24 the musl prebuild is
+  used directly, with no node-gyp compile in the image.
+- Web UI test stack: `@testing-library/jest-dom` 6 → 7 and
+  `@testing-library/react` 16.3.1 → 16.3.2. jest-dom 7 requires Node 22+
+  and makes `@testing-library/dom` a real peer dependency, so it is now
+  declared explicitly in `web-ui/package.json` instead of being hoisted in
+  from `@testing-library/react`.
+
 ## [0.2.0-alpha] — 2026-07-15
 
 ### Added
